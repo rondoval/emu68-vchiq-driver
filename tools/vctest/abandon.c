@@ -14,7 +14,7 @@
 #include <exec/errors.h>
 #include <exec/io.h>
 
-#include <kv.h>
+#include <emu68test/kv.h>
 #include <vchiq/vchiq_test.h> /* NSCMD_VQ_TEST_ABANDON */
 
 #include "commands.h"
@@ -74,6 +74,6 @@ int do_abandon(struct tool *t, LONG *args)
 		return RETURN_FAIL; /* the unit stays open for the reset */
 	}
 	kv_bool("abandon.armed", TRUE);
-	note("GCMD left open, a reply unread; the next reset leaves the session as a crash would\n");
+	kv_note("GCMD left open, a reply unread; the next reset leaves the session as a crash would");
 	return RETURN_OK;
 }
