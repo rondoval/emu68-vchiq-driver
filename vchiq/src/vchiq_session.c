@@ -29,7 +29,7 @@ BOOL vchiq_get_platform(const char *compatible, struct vchiq_platform *platform)
 		u8 addr36;
 		u8 doorbell_gic;
 	} socs[] = {
-	    {"brcm,bcm2711-vchiq", 1, 1}, /* Pi 4, CM4, Pi 400: Cortex-A72 */
+	    {"brcm,bcm2711-vchiq", 1, 1}, /* Pi 4, CM4: Cortex-A72 */
 	    {"brcm,bcm2836-vchiq", 0, 0}, /* Pi 2 (v1.2), Pi 3, CM3, Zero 2 W: Cortex-A53 */
 	};
 
