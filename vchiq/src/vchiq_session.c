@@ -14,7 +14,13 @@
 
 /* ---- the platform and the window ----------------------------------------- */
 
-/* The SoCs the core runs on, and what differs between them. */
+/**
+ * vchiq_get_platform() - What differs between the SoCs the core runs on, for one of them.
+ * @compatible: the SoC's vchiq compatible string
+ * @platform:   filled in when the SoC is known
+ *
+ * Return: FALSE if the core does not run on that SoC.
+ */
 BOOL vchiq_get_platform(const char *compatible, struct vchiq_platform *platform)
 {
 	static const struct
@@ -41,7 +47,18 @@ BOOL vchiq_get_platform(const char *compatible, struct vchiq_platform *platform)
 /* The perf slots' names, as enum vchiq_perf_slot orders them */
 static const char *const perf_names[VQP_SLOT_COUNT] = {"rx_bulk", "rx_prep", "rx_inval", "tx_clean"};
 
-/* Bind the context to the window and the doorbell; the window itself is not touched. */
+/**
+ * vchiq_attach() - Bind the context to the window and the doorbell; the window itself is not touched.
+ * @ctx:         the context, cleared first
+ * @SysBase:     exec.library
+ * @window:      the window's CPU address
+ * @window_size: its size in bytes, at least VCHIQ_WINDOW_MIN_SIZE
+ * @window_bus:  its VPU bus address, page aligned
+ * @bell:        the doorbell block
+ * @platform:    what the SoC needs (vchiq_get_platform()), copied
+ *
+ * Return: 0, or IOERR_BADADDRESS for a NULL pointer, an unaligned @window_bus or a window too small.
+ */
 s32 vchiq_attach(struct vchiq_ctx *ctx, struct ExecBase *SysBase, volatile void *window, u32 window_size,
                  u32 window_bus, volatile void *bell, const struct vchiq_platform *platform)
 {
@@ -70,14 +87,25 @@ s32 vchiq_attach(struct vchiq_ctx *ctx, struct ExecBase *SysBase, volatile void 
 	return 0;
 }
 
-/* The record's slot zero is in its place, and both sides have initialised it. */
+/**
+ * is_slot_zero_live() - Whether the record's slot zero is in its place, and both sides have initialised it.
+ * @ctx: the context
+ *
+ * Return: TRUE if so.
+ */
 static BOOL is_slot_zero_live(const struct vchiq_ctx *ctx)
 {
 	return ctx->host->slot_zero_offset == VCHIQ_SLOT_ZERO_OFFSET && le32(ctx->slot_zero->magic) == VCHIQ_MAGIC &&
 	       le32(ctx->shared_ours->initialised) != 0 && le32(ctx->shared_vpu->initialised) != 0;
 }
 
-/* What the window holds: no record (FRESH), a quiesced session (LIVE_CLEAN), or a dead one (LIVE_DIRTY). */
+/**
+ * vchiq_classify() - What the window holds.
+ * @ctx: the context
+ *
+ * Return: VCHIQ_STATE_FRESH (no record, or one this build cannot read), VCHIQ_STATE_LIVE_CLEAN (a quiesced
+ * session) or VCHIQ_STATE_LIVE_DIRTY (a dead one).
+ */
 s32 vchiq_classify(struct vchiq_ctx *ctx)
 {
 	volatile struct vchiq_host_state *host = ctx->host;
@@ -96,7 +124,11 @@ s32 vchiq_classify(struct vchiq_ctx *ctx)
 #define VPU_SLOT_FIRST (VCHIQ_SLOT_ZERO_SLOTS + 1u)
 #define VPU_SLOT_LAST (VCHIQ_SLOT_ZERO_SLOTS + VCHIQ_SLOTS_PER_SIDE - 1u)
 
-/* Lay out slot zero: the shared fields, both sides' slot ranges, and our half. */
+/**
+ * init_slot_zero() - Lay out slot zero: the shared fields, both sides' slot ranges, and our half.
+ * @ctx: the context
+ * @bus: slot zero's VPU bus address
+ */
 static void init_slot_zero(struct vchiq_ctx *ctx, u32 bus)
 {
 	volatile struct vchiq_slot_zero *slot_zero = ctx->slot_zero;
@@ -142,7 +174,14 @@ static void init_slot_zero(struct vchiq_ctx *ctx, u32 bus)
 	emu68_barrier();
 }
 
-/* Hand slot zero at VPU bus address @bus to the firmware (a property-channel tag); its answer kept in the context. */
+/**
+ * send_init_tag() - Hand slot zero to the firmware (a property-channel tag).
+ * @ctx:         the context; the firmware's answer is kept in last_mailbox_value
+ * @MailboxBase: mailbox.resource
+ * @bus:         slot zero's VPU bus address
+ *
+ * Return: 0, or VQERR_NOCONNECTION: the mailbox call failed, or the firmware did not take the base.
+ */
 static s32 send_init_tag(struct vchiq_ctx *ctx, APTR MailboxBase, u32 bus)
 {
 	ULONG command[7];
@@ -162,7 +201,15 @@ static s32 send_init_tag(struct vchiq_ctx *ctx, APTR MailboxBase, u32 bus)
 	return 0;
 }
 
-/* Wait for the VPU to initialise its half; not vq_poll_until(): the half is not valid until it says so. */
+/**
+ * wait_vpu_half() - Wait for the VPU to initialise its half of slot zero.
+ * @ctx:        the context
+ * @timeout_us: how long to wait
+ *
+ * Not vq_poll_until(): the half is not valid until it says so.
+ *
+ * Return: 0, or VQERR_TIMEOUT.
+ */
 static s32 wait_vpu_half(struct vchiq_ctx *ctx, u32 timeout_us)
 {
 	u32 deadline = get_time() + timeout_us;
@@ -175,10 +222,16 @@ static s32 wait_vpu_half(struct vchiq_ctx *ctx, u32 timeout_us)
 	return 0;
 }
 
-/*
- * A FRESH window: a new host state, slot zero at VCHIQ_SLOT_ZERO_OFFSET handed
- * to the firmware (one tag per VPU boot), then wait for the VPU's half.  BUSY
- * and DISCONNECTED after.
+/**
+ * init_fresh() - Start on a FRESH window.
+ * @ctx:         the context
+ * @MailboxBase: mailbox.resource
+ * @timeout_us:  how long to wait for the VPU's half
+ *
+ * A new host state, slot zero at VCHIQ_SLOT_ZERO_OFFSET handed to the firmware (one tag per VPU boot), then the
+ * wait for the VPU's half.  BUSY and DISCONNECTED after.
+ *
+ * Return: 0, VQERR_NOCONNECTION (the tag failed) or VQERR_TIMEOUT (the VPU's half did not come).
  */
 static s32 init_fresh(struct vchiq_ctx *ctx, APTR MailboxBase, u32 timeout_us)
 {
@@ -208,7 +261,12 @@ static s32 init_fresh(struct vchiq_ctx *ctx, APTR MailboxBase, u32 timeout_us)
 
 /* ---- the next session: resume, or repair --------------------------------- */
 
-/* A LIVE_CLEAN window: the next session on the connection, which stays as it was. */
+/**
+ * resume() - A LIVE_CLEAN window: the next session on the connection, which stays as it was.
+ * @ctx: the context
+ *
+ * Return: 0, or VQERR_NOCONNECTION: the published and the recorded transmit positions disagree.
+ */
 static s32 resume(struct vchiq_ctx *ctx)
 {
 	volatile struct vchiq_host_state *host = ctx->host;
@@ -222,13 +280,26 @@ static s32 resume(struct vchiq_ctx *ctx)
 	return 0;
 }
 
-/* A VPU slot with claims not all released, other than @current, the one the walk is in. */
+/**
+ * is_slot_held() - Whether a VPU slot has claims not all released.
+ * @host:    the host state
+ * @slot:    the VPU slot's index
+ * @current: the slot the walk is in, which never counts as held
+ *
+ * Return: TRUE if @slot is held.
+ */
 static BOOL is_slot_held(const volatile struct vchiq_host_state *host, u32 slot, u32 current)
 {
 	return slot != current && host->slot_info[slot].release_count != host->slot_info[slot].use_count;
 }
 
-/* How many VPU slots are held, but for @current. */
+/**
+ * count_held_slots() - How many VPU slots are held.
+ * @host:    the host state
+ * @current: the slot the walk is in, not counted
+ *
+ * Return: the number of held slots.
+ */
 static u32 count_held_slots(const volatile struct vchiq_host_state *host, u32 current)
 {
 	u32 held = 0;
@@ -238,12 +309,14 @@ static u32 count_held_slots(const volatile struct vchiq_host_state *host, u32 cu
 	return held;
 }
 
-/*
- * Return the VPU slots the dead session walked to the end but never gave
- * back: the ones whose claims are not all released (clients release in any
- * order), but for the one the walk is in, which keeps its own claim.  They
- * must number the slots walked minus the slots the VPU got back; FALSE,
- * nothing changed, if not.
+/**
+ * return_held_slots() - Return the VPU slots the dead session walked to the end but never gave back.
+ * @ctx: the context
+ *
+ * Those are the ones whose claims are not all released (clients release in any order), but for the one the walk
+ * is in, which keeps its own claim.  They must number the slots walked minus the slots the VPU got back.
+ *
+ * Return: FALSE, nothing changed, if they do not.
  */
 static BOOL return_held_slots(struct vchiq_ctx *ctx)
 {
@@ -268,7 +341,12 @@ static BOOL return_held_slots(struct vchiq_ctx *ctx)
 	return TRUE;
 }
 
-/* Our stream continues from what the VPU saw: whatever was reserved but never published is dropped. */
+/**
+ * resync_tx() - Continue our stream from what the VPU saw.
+ * @ctx: the context
+ *
+ * Whatever was reserved but never published is dropped.
+ */
 static void resync_tx(struct vchiq_ctx *ctx)
 {
 	u32 tx_pos = le32(ctx->shared_ours->tx_pos);
@@ -277,7 +355,13 @@ static void resync_tx(struct vchiq_ctx *ctx)
 	vq_process_free_queue(ctx);
 }
 
-/* Close every port the record says the dead session left open or opening: 0, or the last close's error. */
+/**
+ * close_recorded_ports() - Close every port the record says the dead session left open or opening.
+ * @ctx:        the context
+ * @timeout_us: how long to wait for each port's close
+ *
+ * Return: 0, or the last close's error.
+ */
 static s32 close_recorded_ports(struct vchiq_ctx *ctx, u32 timeout_us)
 {
 	s32 rc = 0;
@@ -296,20 +380,31 @@ static s32 close_recorded_ports(struct vchiq_ctx *ctx, u32 timeout_us)
 	return rc;
 }
 
-/* vq_poll_until() predicate: everything the VPU published has been walked. */
+/**
+ * is_drained() - vq_poll_until() predicate: everything the VPU published has been walked.
+ * @ctx: the context
+ * @arg: unused
+ *
+ * Return: TRUE once rx_pos has reached the VPU's tx_pos.
+ */
 static BOOL is_drained(const struct vchiq_ctx *ctx, const void *arg)
 {
 	(void)arg;
 	return ctx->host->rx_pos == le32(ctx->shared_vpu->tx_pos);
 }
 
-/*
- * A session that died mid-flight left three kinds of debris, all visible in
- * the window: VPU slots it walked but never returned, a transmit position
- * ahead of what it published, and ports it never closed (open, or with the
- * OPEN unanswered).  Each is undone from the shared state the VPU still
- * honours, quiet (no callbacks: the dead session's clients are gone), then
- * the stream is drained of what the VPU had queued for them.
+/**
+ * repair() - Take over the connection of a session that died mid-flight.
+ * @ctx:        the context
+ * @timeout_us: how long to wait for each port's close, and for the drain
+ *
+ * Such a session left three kinds of debris, all visible in the window: VPU slots it walked but never returned, a
+ * transmit position ahead of what it published, and ports it never closed (open, or with the OPEN unanswered).
+ * Each is undone from the shared state the VPU still honours, quiet (no callbacks: the dead session's clients are
+ * gone), then the stream is drained of what the VPU had queued for them.
+ *
+ * Return: 0, connected; VQERR_NOCONNECTION (no slot zero to repair, the session died before CONNECT, the record
+ * and the shared state disagree, or the walk found the stream corrupt); or the error of a close or of the drain.
  */
 static s32 repair(struct vchiq_ctx *ctx, u32 timeout_us)
 {
@@ -338,14 +433,28 @@ static s32 repair(struct vchiq_ctx *ctx, u32 timeout_us)
 
 /* ---- CONNECT, and the session's two calls -------------------------------- */
 
-/* vq_poll_until() predicate: the VPU answered our CONNECT. */
+/**
+ * is_connected() - vq_poll_until() predicate: the VPU answered our CONNECT.
+ * @ctx: the context
+ * @arg: unused
+ *
+ * Return: TRUE once the context is CONNECTED.
+ */
 static BOOL is_connected(const struct vchiq_ctx *ctx, const void *arg)
 {
 	(void)arg;
 	return ctx->conn_state == VCHIQ_CONN_CONNECTED;
 }
 
-/* The CONNECT exchange: ours once, then the VPU's.  A no-op once connected (a resumed session). */
+/**
+ * exchange_connect() - The CONNECT exchange: ours once, then the VPU's.
+ * @ctx:        the context
+ * @timeout_us: how long to wait for room for ours, and for the VPU's
+ *
+ * A no-op once connected (a resumed session).
+ *
+ * Return: 0, the error of queueing our CONNECT, or the wait's (VQERR_TIMEOUT, VQERR_NOCONNECTION).
+ */
 static s32 exchange_connect(struct vchiq_ctx *ctx, u32 timeout_us)
 {
 	if (ctx->conn_state == VCHIQ_CONN_CONNECTED)
@@ -360,7 +469,14 @@ static s32 exchange_connect(struct vchiq_ctx *ctx, u32 timeout_us)
 	return vq_poll_until(ctx, is_connected, NULL, timeout_us);
 }
 
-/* The session's clean end: nothing open, nothing held.  Clears BUSY, sets QUIESCED. */
+/**
+ * quiesce() - The session's clean end: nothing open, nothing held.
+ * @ctx: the context
+ *
+ * Clears BUSY, sets QUIESCED.
+ *
+ * Return: 0, IOERR_UNITBUSY (a service is not FREE) or VQERR_NOCONNECTION (the session is dirty).
+ */
 static s32 quiesce(struct vchiq_ctx *ctx)
 {
 	for (u32 i = 0; i < VCHIQ_MAX_LOCAL_SERVICES; i++)
@@ -456,12 +572,17 @@ static s32 probe_broken(struct vchiq_ctx *ctx, u32 timeout_us)
 	return VQERR_TIMEOUT;
 }
 
-/*
- * Bring the session up as the window says (fresh start, resume or repair), then
- * CONNECT.  A record is trusted only once the VPU has answered on it: nothing
- * clears the window when the VPU alone restarts, so a silent VPU means the
- * record is stale, and the VPU, fresh, takes a new tag in the same window.
+/**
+ * vchiq_connect() - Bring the session up as the window says (fresh start, resume or repair), then CONNECT.
+ * @ctx:         the context
+ * @MailboxBase: mailbox.resource
+ * @timeout_us:  how long each step may wait
+ *
+ * A record is trusted only once the VPU has answered on it: nothing clears the window when the VPU alone
+ * restarts, so a silent VPU means the record is stale, and the VPU, fresh, takes a new tag in the same window.
  * That holds for a record the repair could not use too (probe_broken()).
+ *
+ * Return: 0 (at once if this session is up already), or the failing step's error, the session marked dirty.
  */
 s32 vchiq_connect(struct vchiq_ctx *ctx, APTR MailboxBase, u32 timeout_us)
 {
@@ -507,7 +628,15 @@ s32 vchiq_connect(struct vchiq_ctx *ctx, APTR MailboxBase, u32 timeout_us)
 	return rc;
 }
 
-/* End the session cleanly: every service closed, the window QUIESCED, so the next session resumes. */
+/**
+ * vchiq_shutdown() - End the session cleanly, so the next session resumes.
+ * @ctx:        the context
+ * @timeout_us: how long to wait for each service's close
+ *
+ * Every service is closed and the window left QUIESCED; the context is DISCONNECTED after.
+ *
+ * Return: 0, or quiesce()'s error, the session marked dirty.
+ */
 s32 vchiq_shutdown(struct vchiq_ctx *ctx, u32 timeout_us)
 {
 	ctx->quiet = 1;
@@ -523,7 +652,10 @@ s32 vchiq_shutdown(struct vchiq_ctx *ctx, u32 timeout_us)
 	return rc;
 }
 
-/* Give up on the session: the next one repairs. */
+/**
+ * vchiq_mark_dirty() - Give up on the session: the next one repairs.
+ * @ctx: the context
+ */
 void vchiq_mark_dirty(struct vchiq_ctx *ctx)
 {
 	ctx->host->flags |= VCHIQ_HS_DIRTY;

@@ -10,7 +10,13 @@
 
 /* ---- the VPU's slots ----------------------------------------------------- */
 
-/* Append a VPU slot we are done with to the VPU's recycle queue; the caller signals the VPU's recycle event. */
+/**
+ * vq_recycle_slot() - Append a VPU slot we are done with to the VPU's recycle queue.
+ * @ctx:  the context
+ * @slot: the VPU slot's index
+ *
+ * The caller signals the VPU's recycle event.
+ */
 void vq_recycle_slot(struct vchiq_ctx *ctx, u32 slot)
 {
 	u32 recycle = le32(ctx->shared_vpu->slot_queue_recycle);
@@ -20,10 +26,14 @@ void vq_recycle_slot(struct vchiq_ctx *ctx, u32 slot)
 	ctx->stats.slots_recycled_out++;
 }
 
-/*
- * Hand a VPU slot back once every claim on it is released: @hdr's claim, or
- * with NULL the walk's own claim on the slot.  The per-slot counters are ours,
- * the recycle queue is the VPU's.
+/**
+ * vq_release_slot() - Release one claim on a VPU slot; hand the slot back once every claim on it is released.
+ * @ctx:  the context
+ * @slot: the VPU slot's index
+ * @hdr:  the message whose claim is released (a second release does nothing), or NULL for the walk's own claim on
+ *        the slot
+ *
+ * The per-slot counters are ours, the recycle queue is the VPU's.
  */
 void vq_release_slot(struct vchiq_ctx *ctx, u32 slot, volatile struct vchiq_header *hdr)
 {
@@ -44,7 +54,10 @@ void vq_release_slot(struct vchiq_ctx *ctx, u32 slot, volatile struct vchiq_head
 	}
 }
 
-/* The VPU's sync slot is free again: it may send the next one. */
+/**
+ * vq_release_message_sync() - Free the VPU's sync slot again: the VPU may send the next message.
+ * @ctx: the context
+ */
 void vq_release_message_sync(struct vchiq_ctx *ctx)
 {
 	sync_header(ctx, ctx->shared_vpu)->msgid = le32(VCHIQ_MSGID_PADDING);
@@ -54,10 +67,14 @@ void vq_release_message_sync(struct vchiq_ctx *ctx)
 
 /* ---- messages ------------------------------------------------------------ */
 
-/*
- * The service DATA from the VPU's @srcport to our @dstport goes to, or NULL:
- * no open service for it (unexpected), or the session is quiet (repair or
- * shutdown: nobody will read it, dropped).
+/**
+ * find_receiver() - The service DATA from the VPU goes to.
+ * @ctx:     the context
+ * @dstport: our port
+ * @srcport: the VPU's port
+ *
+ * Return: the service, or NULL: no open service for it (unexpected), or the session is quiet (repair or shutdown:
+ * nobody will read it, dropped).
  */
 static struct vchiq_service *find_receiver(struct vchiq_ctx *ctx, u32 dstport, u32 srcport)
 {
@@ -75,7 +92,14 @@ static struct vchiq_service *find_receiver(struct vchiq_ctx *ctx, u32 dstport, u
 	return svc;
 }
 
-/* Put @hdr on @svc's queue for its client.  FALSE if the queue is full: the message stays where it is. */
+/**
+ * queue_for_client() - Put a message on a service's queue for its client.
+ * @ctx: the context
+ * @svc: the service
+ * @hdr: the message
+ *
+ * Return: FALSE if the queue is full: the message stays where it is.
+ */
 static BOOL queue_for_client(struct vchiq_ctx *ctx, struct vchiq_service *svc, volatile struct vchiq_header *hdr)
 {
 	if (svc->rxq_tail - svc->rxq_head >= VCHIQ_RXQ_SIZE)
@@ -88,7 +112,17 @@ static BOOL queue_for_client(struct vchiq_ctx *ctx, struct vchiq_service *svc, v
 	return TRUE;
 }
 
-/* An OPENACK on our port @dstport: our OPEN accepted (through the VPU's sync slot if @sync), with its port and version. */
+/**
+ * parse_openack() - An OPENACK: the VPU accepted our OPEN.
+ * @ctx:     the context
+ * @hdr:     the message; its payload carries the VPU's version
+ * @size:    the payload's size in bytes
+ * @dstport: our port
+ * @srcport: the VPU's port for the service
+ * @sync:    it came through the VPU's sync slot: the service is synchronous
+ *
+ * Unexpected unless a service on @dstport has its OPEN unanswered.
+ */
 static void parse_openack(struct vchiq_ctx *ctx, volatile struct vchiq_header *hdr, u32 size, u32 dstport, u32 srcport,
                           BOOL sync)
 {
@@ -99,7 +133,15 @@ static void parse_openack(struct vchiq_ctx *ctx, volatile struct vchiq_header *h
 		ctx->stats.unexpected_msgs++;
 }
 
-/* A CLOSE on our port @dstport: the VPU refused our OPEN, answered our CLOSE, or closes an open service. */
+/**
+ * parse_close() - A CLOSE: the VPU refused our OPEN, answered our CLOSE, or closes an open service.
+ * @ctx:     the context
+ * @dstport: our port
+ * @srcport: the VPU's port
+ *
+ * The VPU's close of an OPEN service is answered in kind and reported to the service's callback.  The answer is
+ * queued inside the walk, so without polling: it waits up to CLOSE_ANSWER_US for room.
+ */
 static void parse_close(struct vchiq_ctx *ctx, u32 dstport, u32 srcport)
 {
 	struct vchiq_service *svc = vq_find_service_by_port(ctx, dstport);
@@ -121,9 +163,16 @@ static void parse_close(struct vchiq_ctx *ctx, u32 dstport, u32 srcport)
 	}
 }
 
-/*
- * DATA in the VPU's stream: held in the service's queue, its slot claimed,
- * until the client releases it.  FALSE if the queue is full: the walk waits.
+/**
+ * parse_data() - DATA in the VPU's stream: queued for its service's client.
+ * @ctx:   the context
+ * @hdr:   the message
+ * @msgid: its msgid, in host order
+ *
+ * The message is held in the service's queue, its slot claimed, until the client releases it.  One with no
+ * receiver is passed over.
+ *
+ * Return: FALSE if the queue is full: the walk waits.
  */
 static BOOL parse_data(struct vchiq_ctx *ctx, volatile struct vchiq_header *hdr, u32 msgid)
 {
@@ -138,7 +187,17 @@ static BOOL parse_data(struct vchiq_ctx *ctx, volatile struct vchiq_header *hdr,
 	return TRUE;
 }
 
-/* BULK_TX_DONE or BULK_RX_DONE (@dir): the VPU finished, or aborted, the oldest bulk of that direction. */
+/**
+ * parse_bulk_done() - BULK_TX_DONE or BULK_RX_DONE: the VPU finished, or aborted, the oldest bulk of that direction.
+ * @ctx:     the context
+ * @hdr:     the message; its payload is the bytes moved, or VCHIQ_BULK_ACTUAL_ABORTED
+ * @size:    the payload's size in bytes
+ * @dstport: our port
+ * @srcport: the VPU's port
+ * @dir:     VCHIQ_BULK_TX or VCHIQ_BULK_RX
+ *
+ * Taken for a CLOSING service too: its bulks are still ours.
+ */
 static void parse_bulk_done(struct vchiq_ctx *ctx, volatile struct vchiq_header *hdr, u32 size, u32 dstport, u32 srcport,
                             u32 dir)
 {
@@ -154,10 +213,17 @@ static void parse_bulk_done(struct vchiq_ctx *ctx, volatile struct vchiq_header 
 	vq_finish_bulk(ctx, svc, dir, bulk, actual);
 }
 
-/*
- * One message of the VPU's stream.  FALSE leaves it where it is: a service
- * whose queue is full holds up the walk until its client takes a message;
- * nothing before that check changes any state.
+/**
+ * parse_message() - One message of the VPU's stream.
+ * @ctx:   the context
+ * @hdr:   the message
+ * @msgid: its msgid, in host order
+ * @size:  its payload's size in bytes
+ *
+ * A service whose queue is full holds up the walk until its client takes a message; nothing before that check
+ * changes any state.
+ *
+ * Return: FALSE leaves the message where it is.
  */
 static BOOL parse_message(struct vchiq_ctx *ctx, volatile struct vchiq_header *hdr, u32 msgid, u32 size)
 {
@@ -196,10 +262,13 @@ static BOOL parse_message(struct vchiq_ctx *ctx, volatile struct vchiq_header *h
 	return TRUE;
 }
 
-/*
- * The header of the message at rx_pos, entering its slot (the walk's own
- * claim, released at the end of the slot) when rx_pos starts one.  NULL, the
- * session marked dirty, if the stream is corrupt.
+/**
+ * enter_message() - The header of the message at rx_pos, entering its slot when rx_pos starts one.
+ * @ctx: the context
+ *
+ * Entering a slot takes the walk's own claim on it, released at the end of the slot.
+ *
+ * Return: the header, or NULL, the session marked dirty, if the stream is corrupt.
  */
 static volatile struct vchiq_header *enter_message(struct vchiq_ctx *ctx)
 {
@@ -225,7 +294,13 @@ static volatile struct vchiq_header *enter_message(struct vchiq_ctx *ctx)
 	return hdr;
 }
 
-/* Step rx_pos past a message of @size bytes; at the end of its slot, leave the slot (release the walk's claim). */
+/**
+ * leave_message() - Step rx_pos past a message; at the end of its slot, leave the slot.
+ * @ctx:  the context
+ * @size: the message's payload size in bytes
+ *
+ * Leaving the slot releases the walk's claim on it.
+ */
 static void leave_message(struct vchiq_ctx *ctx, u32 size)
 {
 	volatile struct vchiq_host_state *host = ctx->host;
@@ -237,7 +312,13 @@ static void leave_message(struct vchiq_ctx *ctx, u32 size)
 	vq_release_slot(ctx, done, NULL);
 }
 
-/* Walk the VPU's stream from rx_pos to its published tx_pos. */
+/**
+ * parse_rx_slots() - Walk the VPU's stream from rx_pos to its published tx_pos.
+ * @ctx: the context
+ *
+ * Stops early on a corrupt stream (the session is dirty) and at a stalled message, which comes round again on the
+ * next poll.
+ */
 static void parse_rx_slots(struct vchiq_ctx *ctx)
 {
 	u32 tx_pos = le32(ctx->shared_vpu->tx_pos);
@@ -254,10 +335,16 @@ static void parse_rx_slots(struct vchiq_ctx *ctx)
 	}
 }
 
-/*
- * DATA in the VPU's sync slot.  FALSE leaves it there: held for a
- * synchronous service's client until vchiq_release_message(), or, its queue
- * full, for the next poll.
+/**
+ * parse_sync_data() - DATA in the VPU's sync slot: queued for a synchronous service's client.
+ * @ctx:     the context
+ * @hdr:     the message
+ * @size:    its payload's size in bytes
+ * @dstport: our port
+ * @srcport: the VPU's port
+ *
+ * Return: FALSE leaves it there: held for the client until vchiq_release_message(), or, the service's queue full,
+ * for the next poll.  TRUE: nobody takes it (no receiver, not a synchronous service, too long).
  */
 static BOOL parse_sync_data(struct vchiq_ctx *ctx, volatile struct vchiq_header *hdr, u32 size, u32 dstport, u32 srcport)
 {
@@ -277,7 +364,15 @@ static BOOL parse_sync_data(struct vchiq_ctx *ctx, volatile struct vchiq_header 
 	return FALSE;
 }
 
-/* The message in the VPU's sync slot.  FALSE leaves it there (parse_sync_data()). */
+/**
+ * parse_sync_message() - The message in the VPU's sync slot.
+ * @ctx:   the context
+ * @hdr:   the message
+ * @msgid: its msgid, in host order
+ * @size:  its payload's size in bytes
+ *
+ * Return: FALSE leaves it there (parse_sync_data()).
+ */
 static BOOL parse_sync_message(struct vchiq_ctx *ctx, volatile struct vchiq_header *hdr, u32 msgid, u32 size)
 {
 	u32 type = VCHIQ_MSG_TYPE(msgid);
@@ -299,9 +394,11 @@ static BOOL parse_sync_message(struct vchiq_ctx *ctx, volatile struct vchiq_head
 	}
 }
 
-/*
- * The VPU's synchronous channel: its sync slot holds one message, not
- * PADDING, until we release it, which lets the VPU send the next.
+/**
+ * parse_sync_slot() - Take the message in the VPU's synchronous channel, if there is one.
+ * @ctx: the context
+ *
+ * The VPU's sync slot holds one message, not PADDING, until we release it, which lets the VPU send the next.
  */
 static void parse_sync_slot(struct vchiq_ctx *ctx)
 {
@@ -319,7 +416,12 @@ static void parse_sync_slot(struct vchiq_ctx *ctx)
 
 /* ---- our slots ----------------------------------------------------------- */
 
-/* Take in our slots the VPU has recycled: shared_ours->slot_queue up to its recycle index is ours to send from. */
+/**
+ * vq_process_free_queue() - Take in our slots the VPU has recycled.
+ * @ctx: the context
+ *
+ * shared_ours->slot_queue up to its recycle index is ours to send from.
+ */
 void vq_process_free_queue(struct vchiq_ctx *ctx)
 {
 	u32 recycle = le32(ctx->shared_ours->slot_queue_recycle);
@@ -329,14 +431,22 @@ void vq_process_free_queue(struct vchiq_ctx *ctx)
 
 /* ---- the poll and the doorbell events ------------------------------------ */
 
-/* Clear @event's fired flag if it is set. */
+/**
+ * ack_event() - Clear an event's fired flag if it is set.
+ * @event: one of our events
+ */
 static void ack_event(volatile struct vchiq_remote_event *event)
 {
 	if (le32(event->fired))
 		event->fired = le32(0);
 }
 
-/* Do what the VPU asked for: acknowledge the events, take back our slots, walk its stream and its sync slot. */
+/**
+ * vchiq_poll() - Do what the VPU asked for.
+ * @ctx: the context
+ *
+ * Acknowledges the events, takes back our slots, walks the VPU's stream and its sync slot.
+ */
 void vchiq_poll(struct vchiq_ctx *ctx)
 {
 	/* acknowledge first: a signal that lands during the walk stays pending.  sync_release is a token, not a wake-up. */
@@ -352,7 +462,12 @@ void vchiq_poll(struct vchiq_ctx *ctx)
 	parse_sync_slot(ctx);
 }
 
-/* Set the armed flags: @armed on trigger, recycle and sync_trigger, @sync_release on sync_release. */
+/**
+ * set_armed() - Set our events' armed flags.
+ * @ctx:          the context
+ * @armed:        1 or 0, for trigger, recycle and sync_trigger
+ * @sync_release: 1 or 0, for sync_release
+ */
 static void set_armed(struct vchiq_ctx *ctx, u32 armed, u32 sync_release)
 {
 	ctx->shared_ours->trigger.armed = le32(armed);
@@ -362,22 +477,37 @@ static void set_armed(struct vchiq_ctx *ctx, u32 armed, u32 sync_release)
 	emu68_barrier();
 }
 
-/*
- * Ask the VPU to ring the doorbell for the next message (trigger, sync_trigger),
- * the next recycled slot, and, while a sync send waits, our sync slot coming free.
+/**
+ * vchiq_arm_events() - Ask the VPU to ring the doorbell.
+ * @ctx: the context
+ *
+ * Armed: the next message (trigger, sync_trigger), the next recycled slot, and, while a sync send waits, our sync
+ * slot coming free.
  */
 void vchiq_arm_events(struct vchiq_ctx *ctx)
 {
 	set_armed(ctx, 1u, ctx->sync_tx_waiting);
 }
 
-/* No doorbells wanted (the caller is about to walk, or nobody is left to serve them). */
+/**
+ * vchiq_disarm_events() - No doorbells wanted.
+ * @ctx: the context
+ *
+ * The caller is about to walk, or nobody is left to serve them.
+ */
 void vchiq_disarm_events(struct vchiq_ctx *ctx)
 {
 	set_armed(ctx, 0u, 0u);
 }
 
-/* Something fired since the last vchiq_poll(): checked after arming, it closes the arm/fire race. */
+/**
+ * vchiq_has_fired() - Whether something fired since the last vchiq_poll().
+ * @ctx: the context
+ *
+ * Checked after arming, it closes the arm/fire race.
+ *
+ * Return: TRUE if an event the caller armed has fired.
+ */
 BOOL vchiq_has_fired(const struct vchiq_ctx *ctx)
 {
 	return le32(ctx->shared_ours->trigger.fired) != 0 || le32(ctx->shared_ours->recycle.fired) != 0 ||
@@ -385,15 +515,25 @@ BOOL vchiq_has_fired(const struct vchiq_ctx *ctx)
 	       (ctx->sync_tx_waiting && le32(ctx->shared_ours->sync_release.fired) != 0);
 }
 
-/* The VPU has published messages the walk has not reached. */
+/**
+ * vchiq_has_unwalked() - Whether the VPU has published messages the walk has not reached.
+ * @ctx: the context
+ *
+ * Return: TRUE if so; FALSE without a connected session.
+ */
 BOOL vchiq_has_unwalked(const struct vchiq_ctx *ctx)
 {
 	return ctx->conn_state == VCHIQ_CONN_CONNECTED && ctx->host->rx_pos != le32(ctx->shared_vpu->tx_pos);
 }
 
-/*
- * Poll the stream until @done holds: 0, VQERR_NOCONNECTION once the session
- * goes dirty, VQERR_TIMEOUT after @timeout_us.  The blocking helpers' wait.
+/**
+ * vq_poll_until() - Poll the stream until a condition holds.  The blocking helpers' wait.
+ * @ctx:        the context
+ * @done:       the condition, checked after every poll
+ * @arg:        passed to @done
+ * @timeout_us: how long to wait
+ *
+ * Return: 0, VQERR_NOCONNECTION once the session goes dirty, VQERR_TIMEOUT after @timeout_us.
  */
 s32 vq_poll_until(struct vchiq_ctx *ctx, BOOL (*done)(const struct vchiq_ctx *, const void *), const void *arg,
                   u32 timeout_us)

@@ -23,7 +23,15 @@
 #include <devtree.h>
 #include <errors.h>
 
-/* The doorbell block: the node labelled "vchiq" (the label overlays use; there is no alias). */
+/**
+ * find_vchiq_node() - Find the doorbell block's node.
+ * @DeviceTreeBase: devicetree.resource
+ * @platform: filled with the SoC's description
+ *
+ * The node labelled "vchiq" (the label overlays use; there is no alias), if its SoC is supported.
+ *
+ * Return: the open node, or NULL (logged if it exists but is unsupported).
+ */
 static APTR find_vchiq_node(APTR DeviceTreeBase, struct vchiq_platform *platform)
 {
 	APTR node = DT_OpenSymbol(DeviceTreeBase, (CONST_STRPTR) "vchiq");
@@ -40,7 +48,15 @@ static APTR find_vchiq_node(APTR DeviceTreeBase, struct vchiq_platform *platform
 	return NULL;
 }
 
-/* Fills the hardware fields of @base (the window, taken already, gets its VPU address); 0, or ENODEV with the reason logged. */
+/**
+ * DevTreeParse() - Fill the hardware fields of @base.
+ * @base: the device base; the window, taken already, gets its VPU address
+ *
+ * Sets the doorbell address, interrupt (-1: the device polls), the window's bus address, the reach of
+ * the VPU and the optional VRAM range.
+ *
+ * Return: 0, or ENODEV with the reason logged.
+ */
 u32 DevTreeParse(struct VCHIQDevice *base)
 {
 	struct ExecBase *SysBase = base->sysBase;

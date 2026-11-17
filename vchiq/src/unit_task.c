@@ -32,6 +32,17 @@
 
 /* ---- the core's callback ------------------------------------------------------ */
 
+/**
+ * UnitCallback() - The core's service callback: complete bulks, note a closed service.
+ * @ctx: the core context, unused
+ * @svc: the service; userdata is its unit
+ * @reason: VCHIQ_REASON_*
+ * @bulk: the bulk, for the bulk reasons
+ * @bulk_actual: bytes transferred, or VCHIQ_BULK_ACTUAL_ABORTED
+ *
+ * A bulk's request is replied here, as the stream is walked. When the VPU closes the service the unit
+ * is marked closed and its queued requests fail with VQERR_CLOSED.
+ */
 void UnitCallback(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 reason, const struct vchiq_bulk *bulk,
                   s32 bulk_actual)
 {
@@ -65,7 +76,16 @@ void UnitCallback(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 reason, 
 
 /* ---- the round ---------------------------------------------------------------- */
 
-/* Held messages to waiting reads, oldest first; io_Actual is the message's size.  TRUE if any went. */
+/**
+ * deliver_messages() - Hand held messages to waiting reads, oldest first.
+ * @base: the device base, lock held, inside the ring
+ * @unit: the unit
+ *
+ * io_Actual is the message's size; a message longer than the buffer is truncated and replied
+ * VQERR_TRUNCATED.
+ *
+ * Return: TRUE if any message went.
+ */
 static BOOL deliver_messages(struct VCHIQDevice *base, struct VCHIQUnit *unit)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -123,7 +143,12 @@ static void submit_requests(struct VCHIQDevice *base, struct VCHIQUnit *unit, st
 	}
 }
 
-/* Walk the VPU's stream, then deliver and submit for every unit; again while a delivery lets a stalled walk go on. */
+/**
+ * process_units() - Walk the VPU's stream, then deliver and submit for every unit.
+ * @base: the device base, lock held, inside the ring
+ *
+ * Repeats while a delivery lets a stalled walk go on.
+ */
 static void process_units(struct VCHIQDevice *base)
 {
 	struct vchiq_ctx *ctx = &base->ctx;
@@ -150,6 +175,14 @@ static void process_units(struct VCHIQDevice *base)
 
 /* ---- the task ------------------------------------------------------------------ */
 
+/**
+ * UnitTask() - The device task: one for all units.
+ * @base: the device base
+ * @parent: the task that spawned it, signalled when running
+ *
+ * Runs a round under the lock whenever the doorbell signal, the poll tick or a BeginIO kick wakes it,
+ * until CTRL_C.
+ */
 static void UnitTask(struct VCHIQDevice *base, struct Task *parent)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -233,6 +266,12 @@ static void UnitTask(struct VCHIQDevice *base, struct Task *parent)
 	drv_task_exit(SysBase, &base->task, FindTask(NULL), TRUE);
 }
 
+/**
+ * UnitTaskStart() - Start the device task.
+ * @base: the device base
+ *
+ * Return: 0, or VQERR_NOCONNECTION if it did not start.
+ */
 s32 UnitTaskStart(struct VCHIQDevice *base)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -242,6 +281,10 @@ s32 UnitTaskStart(struct VCHIQDevice *base)
 	           : VQERR_NOCONNECTION;
 }
 
+/**
+ * UnitTaskStop() - Stop the device task and wait for it to end.
+ * @base: the device base
+ */
 void UnitTaskStop(struct VCHIQDevice *base)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -249,6 +292,12 @@ void UnitTaskStop(struct VCHIQDevice *base)
 	drv_task_join(SysBase, &base->task);
 }
 
+/**
+ * UnitTaskKick() - Wake the device task for a new request.
+ * @base: the device base
+ *
+ * A unit is open: the task runs (it stops only at expunge).
+ */
 void UnitTaskKick(struct VCHIQDevice *base)
 {
 	struct ExecBase *SysBase = base->sysBase;

@@ -7,7 +7,13 @@
 
 /* ---- the table ----------------------------------------------------------- */
 
-/* The service on our port @port; NULL if none or FREE. */
+/**
+ * vq_find_service_by_port() - The service on one of our ports.
+ * @ctx:  the context
+ * @port: our port
+ *
+ * Return: the service; NULL if none or FREE.
+ */
 struct vchiq_service *vq_find_service_by_port(struct vchiq_ctx *ctx, u32 port)
 {
 	if (port >= VCHIQ_MAX_LOCAL_SERVICES)
@@ -16,14 +22,26 @@ struct vchiq_service *vq_find_service_by_port(struct vchiq_ctx *ctx, u32 port)
 	return svc->state == VCHIQ_SVC_FREE ? NULL : svc;
 }
 
-/* The service a message from the VPU's port @src to our port @dst is for; NULL if none. */
+/**
+ * vq_find_peer_service() - The service a message from the VPU is for.
+ * @ctx: the context
+ * @dst: our port
+ * @src: the VPU's port
+ *
+ * Return: the service; NULL if none.
+ */
 struct vchiq_service *vq_find_peer_service(struct vchiq_ctx *ctx, u32 dst, u32 src)
 {
 	struct vchiq_service *svc = vq_find_service_by_port(ctx, dst);
 	return svc != NULL && svc->remoteport == src ? svc : NULL;
 }
 
-/* A FREE entry of the table; NULL if every port is taken. */
+/**
+ * find_free_service() - A FREE entry of the table.
+ * @ctx: the context
+ *
+ * Return: the entry; NULL if every port is taken.
+ */
 static struct vchiq_service *find_free_service(struct vchiq_ctx *ctx)
 {
 	for (u32 i = 0; i < VCHIQ_MAX_LOCAL_SERVICES; i++)
@@ -32,28 +50,47 @@ static struct vchiq_service *find_free_service(struct vchiq_ctx *ctx)
 	return NULL;
 }
 
-/* An empty FREE service on @port. */
+/**
+ * reset_service() - Make a table entry an empty FREE service.
+ * @svc:  the entry
+ * @port: its port: its index in the table
+ */
 static void reset_service(struct vchiq_service *svc, u32 port)
 {
 	memset(svc, 0, sizeof(*svc));
 	svc->localport = (u16)port;
 }
 
-/* Every service FREE and empty (a new session). */
+/**
+ * vq_reset_services() - Make every service FREE and empty (a new session).
+ * @ctx: the context
+ */
 void vq_reset_services(struct vchiq_ctx *ctx)
 {
 	for (u32 i = 0; i < VCHIQ_MAX_LOCAL_SERVICES; i++)
 		reset_service(&ctx->services[i], i);
 }
 
-/* Record @svc's port in the window as open (its fourcc, the VPU's port) or clear it: what a repair closes. */
+/**
+ * vq_record_port() - Record a service's port in the window as open, or clear it: what a repair closes.
+ * @ctx:  the context
+ * @svc:  the service
+ * @open: TRUE records its fourcc and the VPU's port, FALSE clears them
+ */
 void vq_record_port(struct vchiq_ctx *ctx, const struct vchiq_service *svc, BOOL open)
 {
 	ctx->host->port_fourcc[svc->localport] = open ? svc->fourcc : 0u;
 	ctx->host->port_remote[svc->localport] = open ? svc->remoteport : 0u;
 }
 
-/* The service's callback, if it has one and the session is not quiet. */
+/**
+ * vq_make_service_callback() - Call the service's callback, if it has one and the session is not quiet.
+ * @ctx:         the context
+ * @svc:         the service
+ * @reason:      VCHIQ_REASON_*
+ * @bulk:        the bulk the reason is about, or NULL
+ * @bulk_actual: the bytes it moved
+ */
 void vq_make_service_callback(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 reason, const struct vchiq_bulk *bulk,
                               s32 bulk_actual)
 {
@@ -63,7 +100,11 @@ void vq_make_service_callback(struct vchiq_ctx *ctx, struct vchiq_service *svc, 
 
 /* ---- open and close ------------------------------------------------------ */
 
-/* Every held message released unread. */
+/**
+ * release_service_messages() - Release every message the service holds, unread.
+ * @ctx: the context
+ * @svc: the service
+ */
 static void release_service_messages(struct vchiq_ctx *ctx, struct vchiq_service *svc)
 {
 	volatile struct vchiq_header *hdr;
@@ -74,10 +115,17 @@ static void release_service_messages(struct vchiq_ctx *ctx, struct vchiq_service
 	}
 }
 
-/*
- * The VPU accepted our OPEN (an OPENACK from port @src), on its sync slot if
- * @sync.  A service abandoned mid-open only learns the VPU's port: the CLOSE
- * it already sent closes that, and the VPU answers it.
+/**
+ * vq_set_service_open() - The VPU accepted our OPEN (an OPENACK).
+ * @ctx:  the context
+ * @svc:  the service, its OPEN unanswered
+ * @src:  the VPU's port for it
+ * @hdr:  the OPENACK; its payload carries the VPU's version
+ * @size: the payload's size in bytes
+ * @sync: it came on the VPU's sync slot: the service is synchronous
+ *
+ * A service abandoned mid-open only learns the VPU's port: the CLOSE it already sent closes that, and the VPU
+ * answers it.
  */
 void vq_set_service_open(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 src, volatile struct vchiq_header *hdr,
                          u32 size, BOOL sync)
@@ -92,7 +140,13 @@ void vq_set_service_open(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 s
 	svc->state = VCHIQ_SVC_OPEN;
 }
 
-/* The service is gone on both sides: its messages dropped, its bulks reported aborted. */
+/**
+ * vq_close_service_complete() - The service is gone on both sides: make it CLOSED.
+ * @ctx: the context
+ * @svc: the service
+ *
+ * Its messages are dropped, its bulks reported aborted.
+ */
 void vq_close_service_complete(struct vchiq_ctx *ctx, struct vchiq_service *svc)
 {
 	release_service_messages(ctx, svc);
@@ -106,7 +160,20 @@ void vq_close_service_complete(struct vchiq_ctx *ctx, struct vchiq_service *svc)
 	svc->state = VCHIQ_SVC_CLOSED;
 }
 
-/* Take a FREE entry and queue OPEN for service @fourcc: OPENING until a poll brings the VPU's answer. */
+/**
+ * vchiq_queue_service_open() - Take a FREE entry and queue OPEN for a service.
+ * @ctx:         the context
+ * @fourcc:      the service's name
+ * @version:     the version we speak
+ * @version_min: the oldest version we accept
+ * @cb:          the service's callback; may be NULL
+ * @userdata:    the client's, kept in the service
+ * @out:         the service, set on success only
+ *
+ * The service is OPENING until a poll brings the VPU's answer.
+ *
+ * Return: 0, VQERR_NOCONNECTION (not connected), IOERR_UNITBUSY (no free entry, or no room in our stream).
+ */
 s32 vchiq_queue_service_open(struct vchiq_ctx *ctx, u32 fourcc, s16 version, s16 version_min,
                              vchiq_callback_t cb, APTR userdata, struct vchiq_service **out)
 {
@@ -137,7 +204,16 @@ s32 vchiq_queue_service_open(struct vchiq_ctx *ctx, u32 fourcc, s16 version, s16
 	return 0;
 }
 
-/* Queue CLOSE for an OPEN or OPENING service: CLOSING until a poll brings the VPU's answer. */
+/**
+ * vchiq_queue_service_close() - Queue CLOSE for an OPEN or OPENING service.
+ * @ctx: the context
+ * @svc: the service
+ *
+ * The service is CLOSING until a poll brings the VPU's answer.
+ *
+ * Return: 0, also when already CLOSING or CLOSED; VQERR_CLOSED when FREE; or the error of queueing the CLOSE,
+ * nothing changed.
+ */
 s32 vchiq_queue_service_close(struct vchiq_ctx *ctx, struct vchiq_service *svc)
 {
 	switch (svc->state)
@@ -167,21 +243,43 @@ s32 vchiq_queue_service_close(struct vchiq_ctx *ctx, struct vchiq_service *svc)
 	}
 }
 
-/* A CLOSED service back to the table. */
+/**
+ * vchiq_free_service() - A CLOSED service back to the table.
+ * @svc: the service; in any other state, nothing happens
+ */
 void vchiq_free_service(struct vchiq_service *svc)
 {
 	if (svc->state == VCHIQ_SVC_CLOSED)
 		svc->state = VCHIQ_SVC_FREE;
 }
 
-/* vq_poll_until() predicate: the VPU answered the OPEN (accepted or refused). */
+/**
+ * is_open_answered() - vq_poll_until() predicate: the VPU answered the OPEN (accepted or refused).
+ * @ctx: unused
+ * @arg: the service
+ *
+ * Return: TRUE once the service has left OPENING.
+ */
 static BOOL is_open_answered(const struct vchiq_ctx *ctx, const void *arg)
 {
 	(void)ctx;
 	return ((const struct vchiq_service *)arg)->state != VCHIQ_SVC_OPENING;
 }
 
-/* Open service @fourcc and poll for the answer (the probe's way); closed again on failure. */
+/**
+ * vchiq_open_service() - Open a service and poll for the answer (the probe's way).
+ * @ctx:         the context
+ * @fourcc:      the service's name
+ * @version:     the version we speak
+ * @version_min: the oldest version we accept
+ * @out:         the service, set on success only
+ * @timeout_us:  how long to wait for the answer, and for the close on failure
+ *
+ * On failure the service is closed again: refused, it is freed; unanswered, abandoned.
+ *
+ * Return: 0, the error of queueing the OPEN, VQERR_TIMEOUT or VQERR_NOCONNECTION from the wait, VQERR_REJECTED
+ * (refused).
+ */
 s32 vchiq_open_service(struct vchiq_ctx *ctx, u32 fourcc, s16 version, s16 version_min,
                        struct vchiq_service **out, u32 timeout_us)
 {
@@ -201,14 +299,27 @@ s32 vchiq_open_service(struct vchiq_ctx *ctx, u32 fourcc, s16 version, s16 versi
 	return 0;
 }
 
-/* vq_poll_until() predicate: the VPU answered the CLOSE. */
+/**
+ * is_close_answered() - vq_poll_until() predicate: the VPU answered the CLOSE.
+ * @ctx: unused
+ * @arg: the service
+ *
+ * Return: TRUE once the service has left CLOSING.
+ */
 static BOOL is_close_answered(const struct vchiq_ctx *ctx, const void *arg)
 {
 	(void)ctx;
 	return ((const struct vchiq_service *)arg)->state != VCHIQ_SVC_CLOSING;
 }
 
-/* Close a service, poll for the VPU's answer, free it. */
+/**
+ * vchiq_close_service() - Close a service, poll for the VPU's answer, free it.
+ * @ctx:        the context
+ * @svc:        the service
+ * @timeout_us: how long to wait for the answer
+ *
+ * Return: 0, the error of queueing the CLOSE, or the wait's: a timeout leaves the service CLOSING, not clean.
+ */
 s32 vchiq_close_service(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 timeout_us)
 {
 	s32 rc = vchiq_queue_service_close(ctx, svc);
@@ -221,7 +332,19 @@ s32 vchiq_close_service(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 ti
 
 /* ---- messages ------------------------------------------------------------ */
 
-/* Queue a DATA message on an OPEN service, through the sync slots if the VPU made it synchronous. */
+/**
+ * vchiq_queue_message() - Queue a DATA message on an OPEN service.
+ * @ctx:        the context
+ * @svc:        the service
+ * @data:       the payload, copied
+ * @size:       its size in bytes
+ * @timeout_us: how long to wait for room
+ * @poll:       the wait may walk the VPU's stream
+ *
+ * Goes through the sync slots if the VPU made the service synchronous at OPENACK.
+ *
+ * Return: 0, VQERR_CLOSED (not OPEN), or the error of queueing it.
+ */
 s32 vchiq_queue_message(struct vchiq_ctx *ctx, struct vchiq_service *svc, const void *data, u32 size, u32 timeout_us,
                         BOOL poll)
 {
@@ -233,7 +356,12 @@ s32 vchiq_queue_message(struct vchiq_ctx *ctx, struct vchiq_service *svc, const 
 	return vq_queue_message(ctx, msgid, data, size, timeout_us, poll);
 }
 
-/* The service's next held message, oldest first; NULL if none. */
+/**
+ * vchiq_take_message() - The service's next held message, oldest first.
+ * @svc: the service
+ *
+ * Return: the message; NULL if none.
+ */
 volatile struct vchiq_header *vchiq_take_message(struct vchiq_service *svc)
 {
 	if (svc->rxq_head == svc->rxq_tail)
@@ -243,7 +371,13 @@ volatile struct vchiq_header *vchiq_take_message(struct vchiq_service *svc)
 	return hdr;
 }
 
-/* vq_poll_until() predicate: a message to take, or no more will come. */
+/**
+ * has_message_or_closed() - vq_poll_until() predicate: a message to take, or no more will come.
+ * @ctx: unused
+ * @arg: the service
+ *
+ * Return: TRUE if the service's queue holds a message or the service is not OPEN.
+ */
 static BOOL has_message_or_closed(const struct vchiq_ctx *ctx, const void *arg)
 {
 	(void)ctx;
@@ -251,13 +385,26 @@ static BOOL has_message_or_closed(const struct vchiq_ctx *ctx, const void *arg)
 	return svc->rxq_head != svc->rxq_tail || svc->state != VCHIQ_SVC_OPEN;
 }
 
-/* vchiq_take_message(), polling up to @timeout_us for a message. */
+/**
+ * vchiq_dequeue_message() - vchiq_take_message(), polling for a message.
+ * @ctx:        the context
+ * @svc:        the service
+ * @timeout_us: how long to wait for one
+ *
+ * Return: the message; NULL if the wait failed, or ended with the service no longer OPEN and its queue empty.
+ */
 volatile struct vchiq_header *vchiq_dequeue_message(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 timeout_us)
 {
 	return vq_poll_until(ctx, has_message_or_closed, svc, timeout_us) == 0 ? vchiq_take_message(svc) : NULL;
 }
 
-/* A taken message released: a VPU data slot goes back once all its claims are, the VPU's sync slot at once. */
+/**
+ * vchiq_release_message() - Release a taken message.
+ * @ctx: the context
+ * @hdr: the message
+ *
+ * A VPU data slot goes back once all its claims are released, the VPU's sync slot at once.
+ */
 void vchiq_release_message(struct vchiq_ctx *ctx, volatile struct vchiq_header *hdr)
 {
 	u32 slot = slot_index_of(ctx, hdr);

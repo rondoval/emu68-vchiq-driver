@@ -13,10 +13,14 @@
 
 #include <device.h>
 
-/*
- * A request comes back: replied, unless BeginIO answers it with IOF_QUICK
- * still set (a queued request has it cleared).  Lock held or not: ReplyMsg()
- * is safe anywhere a task may run.
+/**
+ * UnitReply() - Answer a request.
+ * @base: the device base
+ * @io: the request
+ * @error: io_Error to set
+ *
+ * The request is replied unless BeginIO answers it with IOF_QUICK still set (a queued request has it
+ * cleared). Lock held or not: ReplyMsg() is safe anywhere a task may run.
  */
 void UnitReply(struct VCHIQDevice *base, struct IOVchiqReq *io, s32 error)
 {
@@ -26,6 +30,12 @@ void UnitReply(struct VCHIQDevice *base, struct IOVchiqReq *io, s32 error)
 		ReplyMsg(&io->iovq_Req.io_Message);
 }
 
+/**
+ * fail_list() - Reply every request on a list with @error.
+ * @base: the device base
+ * @list: the request queue, emptied
+ * @error: io_Error to set
+ */
 static void fail_list(struct VCHIQDevice *base, struct MinList *list, BYTE error)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -34,6 +44,12 @@ static void fail_list(struct VCHIQDevice *base, struct MinList *list, BYTE error
 		UnitReply(base, (struct IOVchiqReq *)n, error);
 }
 
+/**
+ * UnitFailRequests() - Reply every queued request of a unit with @error.
+ * @base: the device base
+ * @unit: the unit; its read, send and bulk-read queues are emptied
+ * @error: io_Error to set
+ */
 void UnitFailRequests(struct VCHIQDevice *base, struct VCHIQUnit *unit, BYTE error)
 {
 	fail_list(base, &unit->readq, error);
@@ -43,7 +59,19 @@ void UnitFailRequests(struct VCHIQDevice *base, struct VCHIQUnit *unit, BYTE err
 
 /* ---- the service ----------------------------------------------------------------- */
 
-/* @pred(base, @arg), the VPU's doing, about service @fourcc.  Lock held on entry and on exit; released while waiting. */
+/**
+ * wait_for() - Wait for the VPU's doing, with the lock released.
+ * @base: the device base
+ * @pred: condition, called with (@base, @arg)
+ * @arg: argument for @pred
+ * @fourcc: the service, for the log
+ * @what: the operation, for the log
+ *
+ * Lock held on entry and on exit; released while waiting.
+ *
+ * Return: 0, VQERR_TIMEOUT after VCHIQ_WAIT_MS, or IOERR_OPENFAIL if there is no signal bit or timer
+ *   to wait with.
+ */
 static s32 wait_for(struct VCHIQDevice *base, drv_wait_pred_t pred, APTR arg, u32 fourcc, const char *what)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -61,28 +89,54 @@ static s32 wait_for(struct VCHIQDevice *base, drv_wait_pred_t pred, APTR arg, u3
 	return rc == DRV_WAIT_OK ? 0 : IOERR_OPENFAIL; /* no signal bit or no timer to wait with */
 }
 
+/**
+ * cond_not_opening() - wait_for() predicate: the service has left OPENING.
+ * @base: the device base, unused
+ * @arg: the struct vchiq_service
+ *
+ * Return: TRUE once it has.
+ */
 static BOOL cond_not_opening(APTR base, APTR arg)
 {
 	(void)base;
 	return ((struct vchiq_service *)arg)->state != VCHIQ_SVC_OPENING;
 }
 
+/**
+ * cond_not_closing() - wait_for() predicate: the service has left CLOSING.
+ * @base: the device base, unused
+ * @arg: the struct vchiq_service
+ *
+ * Return: TRUE once it has.
+ */
 static BOOL cond_not_closing(APTR base, APTR arg)
 {
 	(void)base;
 	return ((struct vchiq_service *)arg)->state != VCHIQ_SVC_CLOSING;
 }
 
-/* The VPU handed slots of our stream back since @arg, a snapshot of slot_queue_available. */
+/**
+ * cond_slots_back() - wait_for() predicate: the VPU handed slots of our stream back.
+ * @base: the device base
+ * @arg: pointer to a snapshot of slot_queue_available
+ *
+ * Return: TRUE if the count has changed since the snapshot.
+ */
 static BOOL cond_slots_back(APTR base, APTR arg)
 {
 	return ((struct VCHIQDevice *)base)->ctx.host->slot_queue_available != *(const u32 *)arg;
 }
 
-/*
- * Queue @svc's CLOSE.  A full stream is no reason to give up: the service
- * would stay open with a unit that is gone, so wait for the VPU to hand
- * slots back (each round wakes us) and try again, until it stops doing so.
+/**
+ * queue_close() - Queue the service's CLOSE.
+ * @base: the device base, lock held
+ * @svc: the service
+ *
+ * A full stream is no reason to give up: the service would stay open with a unit that is gone, so wait
+ * for the VPU to hand slots back (each round wakes us) and try again, until it stops doing so.
+ *
+ * Return: 0, or the error of the queueing or of the wait (VQERR_NOCONNECTION if the reset path has the
+ *   ring).
  */
 static s32 queue_close(struct VCHIQDevice *base, struct vchiq_service *svc)
 {
@@ -103,7 +157,15 @@ static s32 queue_close(struct VCHIQDevice *base, struct vchiq_service *svc)
 	}
 }
 
-/* Close and free; a service the VPU closed already only goes back to the table, an unanswered open is abandoned. */
+/**
+ * service_close() - Close and free a service.
+ * @base: the device base, lock held
+ * @svc: the service
+ *
+ * A service the VPU closed already only goes back to the table; an unanswered open is abandoned.
+ *
+ * Return: 0, or the error of queue_close() or the wait for the answer.
+ */
 static s32 service_close(struct VCHIQDevice *base, struct vchiq_service *svc)
 {
 	s32 rc = queue_close(base, svc);
@@ -114,7 +176,17 @@ static s32 service_close(struct VCHIQDevice *base, struct vchiq_service *svc)
 	return rc;
 }
 
-/* The OPEN goes out at once (it is the first message of the service, the task issues none for it). */
+/**
+ * service_open() - Open the unit's service.
+ * @base: the device base, lock held
+ * @unit: the new unit; its svc is set on success
+ * @io: the open request (FourCC and versions)
+ *
+ * The OPEN goes out at once (it is the first message of the service, the task issues none for it). A
+ * refused or unanswered open is closed again.
+ *
+ * Return: 0, VQERR_REJECTED if the VPU refused, or another error (nothing sent if queueing failed).
+ */
 static s32 service_open(struct VCHIQDevice *base, struct VCHIQUnit *unit, const struct IOVchiqReq *io)
 {
 	struct vchiq_service *svc = NULL;
@@ -144,7 +216,17 @@ static s32 service_open(struct VCHIQDevice *base, struct VCHIQUnit *unit, const 
 
 /* ---- open and close --------------------------------------------------------------- */
 
-/* A new unit on base->units, its service open (none for iovq_FourCC 0); NULL and *rc if not. */
+/**
+ * UnitOpen() - Create a unit and open its service.
+ * @base: the device base, lock held
+ * @io: the open request
+ * @rc: set to 0 or the error
+ *
+ * The unit goes on base->units, with its service open (none for iovq_FourCC 0: an information-only
+ * unit).
+ *
+ * Return: the unit, or NULL with *@rc set.
+ */
 struct VCHIQUnit *UnitOpen(struct VCHIQDevice *base, const struct IOVchiqReq *io, s32 *rc)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -169,7 +251,14 @@ struct VCHIQUnit *UnitOpen(struct VCHIQDevice *base, const struct IOVchiqReq *io
 	return unit;
 }
 
-/* Every request of the opener is back by now (Exec's rule); the service closes, waiting for the VPU. */
+/**
+ * UnitClose() - Close a unit and free it.
+ * @base: the device base, lock held
+ * @unit: the unit
+ *
+ * Every request of the opener is back by now (Exec's rule); any left are failed with IOERR_ABORTED.
+ * The service closes, waiting for the VPU.
+ */
 void UnitClose(struct VCHIQDevice *base, struct VCHIQUnit *unit)
 {
 	struct ExecBase *SysBase = base->sysBase;

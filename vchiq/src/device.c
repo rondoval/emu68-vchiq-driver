@@ -17,6 +17,13 @@
 #include <device.h>
 
 LONG __attribute__((used, section(".text.entry"))) doNotExecute(void);
+/**
+ * doNotExecute() - Entry point of the file, so that running it as a program does nothing.
+ *
+ * Placed first in .text.entry.
+ *
+ * Return: -1.
+ */
 LONG __attribute__((used, section(".text.entry"))) doNotExecute(void)
 {
 	return -1;
@@ -42,6 +49,15 @@ static const struct Resident vchiqDeviceResident __attribute__((used, section(".
 
 /* ---- device vectors ------------------------------------------------------------ */
 
+/**
+ * expungeLib() - Device expunge vector.
+ * @base: the device base
+ *
+ * Deferred (LIBF_DELEXP) while open. The ColdReboot vector may have been re-patched on top of our
+ * stub: then the code must stay resident. Otherwise takes the connection down and frees the base.
+ *
+ * Return: the segment list to unload, or 0 if the device stays.
+ */
 static ULONG expungeLib(struct VCHIQDevice *base asm("a6"))
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -68,6 +84,18 @@ static ULONG expungeLib(struct VCHIQDevice *base asm("a6"))
 	return segList;
 }
 
+/**
+ * initFunction() - Device init (RTF_AUTOINIT): check the cache-ops flavour and install the reset
+ *   guard.
+ * @base: the new device base
+ * @segList: the device's segment list
+ * @SysBase: exec
+ *
+ * Refuses to load (and frees the base) if Emu68 lacks dcache-range-ops. The hardware is looked up at
+ * the first open, not here.
+ *
+ * Return: the base, or NULL if the device does not load.
+ */
 static APTR initFunction(struct VCHIQDevice *base asm("d0"), ULONG segList asm("a0"), struct ExecBase *SysBase asm("a6"))
 {
 	if (!emu68_has_dcache_range_ops(SysBase))
@@ -92,11 +120,16 @@ static APTR initFunction(struct VCHIQDevice *base asm("d0"), ULONG segList asm("
 	return base;
 }
 
-/*
- * Unit 0, a struct IOVchiqReq naming the service.  Brings the connection up
- * on first use, then opens the service and waits for the VPU's answer (the
- * lock is released meanwhile, Exec's Forbid() broken by the wait, as by any
- * device that talks to its hardware here).
+/**
+ * openLib() - Device open vector: unit 0, a unit with one VCHIQ service.
+ * @io: a struct IOVchiqReq naming the service
+ * @unitNumber: must be 0
+ * @flags: unused
+ * @base: the device base
+ *
+ * Brings the connection up on first use, then opens the service and waits for the VPU's answer (the
+ * lock is released meanwhile, Exec's Forbid() broken by the wait, as by any device that talks to its
+ * hardware here).
  */
 static void openLib(struct IOVchiqReq *io asm("a1"), ULONG unitNumber asm("d0"), ULONG flags asm("d1"), struct VCHIQDevice *base asm("a6"))
 {
@@ -133,6 +166,13 @@ static void openLib(struct IOVchiqReq *io asm("a1"), ULONG unitNumber asm("d0"),
 	ReleaseSemaphore(&base->lock);
 }
 
+/**
+ * closeLib() - Device close vector: close the opener's unit.
+ * @io: the request that opened it
+ * @base: the device base
+ *
+ * Return: the segment list if the close completed a deferred expunge, else 0.
+ */
 static ULONG closeLib(struct IOVchiqReq *io asm("a1"), struct VCHIQDevice *base asm("a6"))
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -151,6 +191,12 @@ static ULONG closeLib(struct IOVchiqReq *io asm("a1"), struct VCHIQDevice *base 
 	return 0;
 }
 
+/**
+ * extFunc() - Reserved device vector.
+ * @base: the device base, unused
+ *
+ * Return: NULL.
+ */
 static APTR extFunc(struct VCHIQDevice *base asm("a6"))
 {
 	(void)base;

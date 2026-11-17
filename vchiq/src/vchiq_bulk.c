@@ -9,9 +9,14 @@
 
 /* ---- the fragment pool ------------------------------------------------------ */
 
-/*
- * The fragment pool: one 128-byte slot per receive with unaligned ends, handed
- * out from a bitmap (a set bit is a free slot), lowest free slot first.
+/**
+ * alloc_fragment() - Take a slot from the fragment pool.
+ * @ctx: the core context
+ *
+ * The pool is one 128-byte slot per receive with unaligned ends, handed out from a bitmap (a set bit
+ * is a free slot), lowest free slot first.
+ *
+ * Return: the slot number, or -1 if all are taken.
  */
 static s32 alloc_fragment(struct vchiq_ctx *ctx)
 {
@@ -28,13 +33,21 @@ static s32 alloc_fragment(struct vchiq_ctx *ctx)
 	return -1;
 }
 
-/* Fragment slot @i back to the pool. */
+/**
+ * free_fragment() - Give fragment slot @i back to the pool.
+ * @ctx: the core context
+ * @i: the slot number from alloc_fragment()
+ */
 static void free_fragment(struct vchiq_ctx *ctx, u32 i)
 {
 	ctx->fragments_free[i >> 5] |= 1u << (i & 31u);
 }
 
-/* The bulk's fragment slot, if it has one, back to the pool. */
+/**
+ * release_fragment() - Give the bulk's fragment slot, if it has one, back to the pool.
+ * @ctx: the core context
+ * @bulk: the bulk; its fragment field is cleared
+ */
 static void release_fragment(struct vchiq_ctx *ctx, struct vchiq_bulk *bulk)
 {
 	if (bulk->fragment == 0)
@@ -45,28 +58,47 @@ static void release_fragment(struct vchiq_ctx *ctx, struct vchiq_bulk *bulk)
 
 /* ---- cache maintenance and the partial lines ------------------------------ */
 
-/*
- * Emu68 maps its VRAM carve-out inner and outer write-through, which both
- * CPUs it runs on downgrade to non-cacheable (Cortex-A72 TRM table 6-1,
- * Cortex-A53 TRM section 7.5): a buffer in there has no cache lines to
- * maintain, and the range operations over a 6 MB picture would cost the 68k
- * milliseconds per frame for nothing.
+/**
+ * needs_cache_ops() - Whether a buffer needs cache maintenance.
+ * @ctx: the core context (the uncached range)
+ * @start: buffer address
+ * @size: buffer size in bytes
+ *
+ * Emu68 maps its VRAM carve-out inner and outer write-through, which both CPUs it runs on downgrade to
+ * non-cacheable (Cortex-A72 TRM table 6-1, Cortex-A53 TRM section 7.5): a buffer in there has no cache
+ * lines to maintain, and the range operations over a 6 MB picture would cost the 68k milliseconds per
+ * frame for nothing.
+ *
+ * Return: FALSE if the buffer lies wholly in the uncached range, else TRUE.
  */
 static BOOL needs_cache_ops(const struct vchiq_ctx *ctx, u32 start, u32 size)
 {
 	return !(start >= ctx->uncached_start && start + size <= ctx->uncached_end);
 }
 
-/* A receive with an end inside a cache line: the DMA writes whole lines only, so those ends go through a fragment. */
+/**
+ * has_partial_lines() - Whether a receive has an end inside a cache line.
+ * @dir: VCHIQ_BULK_TX or VCHIQ_BULK_RX
+ * @start: buffer address
+ * @size: buffer size in bytes
+ *
+ * The DMA writes whole lines only, so those ends go through a fragment.
+ *
+ * Return: TRUE for a receive whose start or end is not line-aligned.
+ */
 static BOOL has_partial_lines(u32 dir, u32 start, u32 size)
 {
 	return dir == VCHIQ_BULK_RX && (line_offset(start) != 0 || line_offset(start + size) != 0);
 }
 
-/*
- * The partial lines at the ends of @got received bytes, copied in from the
- * bulk's fragment slot: the head from its first line, the tail from its
- * second.
+/**
+ * copy_partial_lines() - Copy the partial lines of a receive in from the fragment slot.
+ * @ctx: the core context (the fragment area)
+ * @bulk: the bulk, with its fragment slot
+ * @got: bytes received
+ *
+ * The partial lines are those at the ends of the @got received bytes: the head comes from the slot's
+ * first line, the tail from its second.
  */
 static void copy_partial_lines(const struct vchiq_ctx *ctx, const struct vchiq_bulk *bulk, u32 got)
 {
@@ -82,11 +114,15 @@ static void copy_partial_lines(const struct vchiq_ctx *ctx, const struct vchiq_b
 		memcpy((void *)((start + got) & ~LINE_MASK), (const void *)(frag + VCHIQ_CACHE_LINE_SIZE), tail);
 }
 
-/*
- * A receive done: the DMA wrote the whole cache lines, whose stale copies are
- * dropped; the partial lines at the ends are copied in by hand from the
- * fragment slot, never invalidated: they hold other people's bytes, which an
- * invalidate would lose.
+/**
+ * finish_receive() - A receive is done: fix up the buffer's cache lines and partial ends.
+ * @ctx: the core context
+ * @bulk: the finished bulk; its fragment slot is released
+ * @actual: bytes received, or VCHIQ_BULK_ACTUAL_ABORTED
+ *
+ * The DMA wrote the whole cache lines, whose stale copies are dropped; the partial lines at the ends
+ * are copied in by hand from the fragment slot, never invalidated: they hold other people's bytes,
+ * which an invalidate would lose.
  */
 static void finish_receive(struct vchiq_ctx *ctx, struct vchiq_bulk *bulk, s32 actual)
 {
@@ -108,7 +144,13 @@ static void finish_receive(struct vchiq_ctx *ctx, struct vchiq_bulk *bulk, s32 a
 
 /* ---- completion -------------------------------------------------------------- */
 
-/* The oldest bulk of @dir in flight on @svc, taken off its queue; NULL if none. */
+/**
+ * vq_pop_bulk() - Take the oldest bulk in flight off the service's queue.
+ * @svc: the service
+ * @dir: VCHIQ_BULK_TX or VCHIQ_BULK_RX
+ *
+ * Return: the bulk, or NULL if none is in flight.
+ */
 struct vchiq_bulk *vq_pop_bulk(struct vchiq_service *svc, u32 dir)
 {
 	if (svc->bulk_head[dir] == svc->bulk_tail[dir])
@@ -118,7 +160,17 @@ struct vchiq_bulk *vq_pop_bulk(struct vchiq_service *svc, u32 dir)
 	return bulk;
 }
 
-/* A bulk is over (@actual bytes, or VCHIQ_BULK_ACTUAL_ABORTED): its buffer is the client's again. */
+/**
+ * vq_finish_bulk() - A bulk is over: its buffer is the client's again.
+ * @ctx: the core context
+ * @svc: the service the bulk was queued on
+ * @dir: VCHIQ_BULK_TX or VCHIQ_BULK_RX
+ * @bulk: the popped bulk record
+ * @actual: bytes transferred, or VCHIQ_BULK_ACTUAL_ABORTED
+ *
+ * Finishes a receive's cache work or releases its fragment, then makes the service callback with the
+ * done or aborted reason. The record is copied first, as it is free once popped.
+ */
 void vq_finish_bulk(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 dir, struct vchiq_bulk *bulk, s32 actual)
 {
 	static const u8 reasons[2][2] = {
@@ -142,31 +194,67 @@ void vq_finish_bulk(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 dir, s
 
 /* ---- queueing ---------------------------------------------------------------- */
 
-/* Fewer than VCHIQ_NUM_SERVICE_BULKS bulks of @dir in flight on @svc. */
+/**
+ * has_bulk_room() - Whether the service can take another bulk.
+ * @svc: the service
+ * @dir: VCHIQ_BULK_TX or VCHIQ_BULK_RX
+ *
+ * Return: TRUE if fewer than VCHIQ_NUM_SERVICE_BULKS bulks of @dir are in flight.
+ */
 static BOOL has_bulk_room(const struct vchiq_service *svc, u32 dir)
 {
 	return svc->bulk_tail[dir] - svc->bulk_head[dir] < VCHIQ_NUM_SERVICE_BULKS;
 }
 
-/* 36-bit page lists reach all RAM; 32-bit ones name bus addresses, so only where dma-ranges maps the VPU. */
+/**
+ * is_reachable() - Whether the VPU can reach a buffer.
+ * @pf: the platform
+ * @start: buffer address
+ * @size: buffer size in bytes
+ *
+ * 36-bit page lists reach all RAM; 32-bit ones name bus addresses, so only where dma-ranges maps the
+ * VPU.
+ *
+ * Return: TRUE if reachable.
+ */
 static BOOL is_reachable(const struct vchiq_platform *pf, u32 start, u32 size)
 {
 	return pf->addr36 || (start >= pf->data_cpu_start && start < pf->data_cpu_end && size <= pf->data_cpu_end - start);
 }
 
-/* Pages one addrs[] entry can cover in the SoC's page-list format. */
+/**
+ * pages_per_entry() - Pages one addrs[] entry can cover in the SoC's page-list format.
+ * @pf: the platform
+ *
+ * Return: the page count.
+ */
 static u32 pages_per_entry(const struct vchiq_platform *pf)
 {
 	return pf->addr36 ? VCHIQ_PAGELIST_PAGES_PER_ENTRY_36 : VCHIQ_PAGELIST_PAGES_PER_ENTRY_32;
 }
 
-/* Pages the buffer touches. */
+/**
+ * page_count() - Pages the buffer touches.
+ * @start: buffer address
+ * @size: buffer size in bytes
+ *
+ * Return: the page count.
+ */
 static u32 page_count(u32 start, u32 size)
 {
 	return ((start & PAGE_MASK) + size + PAGE_MASK) / PAGE_SIZE;
 }
 
-/* Whether the transfer can be queued at all: 0, or the error; nothing changes. */
+/**
+ * check_bulk() - Whether the transfer can be queued at all; nothing changes.
+ * @ctx: the core context
+ * @svc: the service
+ * @dir: VCHIQ_BULK_TX or VCHIQ_BULK_RX
+ * @data: buffer address
+ * @size: buffer size in bytes
+ *
+ * Return: 0, or VQERR_CLOSED, IOERR_BADADDRESS, IOERR_BADLENGTH or IOERR_UNITBUSY.
+ */
 static s32 check_bulk(const struct vchiq_ctx *ctx, const struct vchiq_service *svc, u32 dir, APTR data, u32 size)
 {
 	if (svc->state != VCHIQ_SVC_OPEN)
@@ -185,9 +273,16 @@ static s32 check_bulk(const struct vchiq_ctx *ctx, const struct vchiq_service *s
 	return 0;
 }
 
-/*
- * The window offset of the page list of (@svc, @dir)'s bulk @index: one fixed
- * slot per bulk, so none is ever allocated.
+/**
+ * pagelist_offset() - The window offset of the page list of one bulk.
+ * @ctx: the core context
+ * @svc: the service
+ * @dir: VCHIQ_BULK_TX or VCHIQ_BULK_RX
+ * @index: the bulk's index in the service's ring
+ *
+ * One fixed slot per bulk of (@svc, @dir), so none is ever allocated.
+ *
+ * Return: the offset from the window's start.
  */
 static u32 pagelist_offset(const struct vchiq_ctx *ctx, const struct vchiq_service *svc, u32 dir, u32 index)
 {
@@ -195,7 +290,17 @@ static u32 pagelist_offset(const struct vchiq_ctx *ctx, const struct vchiq_servi
 	return (u32)(ctx->pagelists - ctx->window) + slot * VCHIQ_PAGELIST_SLOT_SIZE;
 }
 
-/* The page list of the buffer: runs of contiguous pages in the SoC's format (vchiq_protocol.h). */
+/**
+ * write_pagelist() - Write the page list of a buffer.
+ * @ctx: the core context
+ * @pl: the page-list slot in the window
+ * @start: buffer address
+ * @size: buffer size in bytes
+ * @type: page-list type (read, write, or read with fragments)
+ *
+ * Runs of contiguous pages in the SoC's format (vchiq_protocol.h), with a barrier before the message
+ * that names it.
+ */
 static void write_pagelist(const struct vchiq_ctx *ctx, volatile struct vchiq_pagelist *pl, u32 start, u32 size, u16 type)
 {
 	const struct vchiq_platform *pf = &ctx->platform;
@@ -217,7 +322,20 @@ static void write_pagelist(const struct vchiq_ctx *ctx, volatile struct vchiq_pa
 	emu68_barrier(); /* the list before the message that names it */
 }
 
-/* Queue a bulk transfer on an OPEN service: its page list written, BULK_TX or BULK_RX in our stream. */
+/**
+ * vchiq_queue_bulk() - Queue a bulk transfer on an OPEN service.
+ * @ctx: the core context
+ * @svc: the service
+ * @dir: VCHIQ_BULK_TX or VCHIQ_BULK_RX
+ * @data: buffer address
+ * @size: buffer size in bytes
+ * @userdata: handed back in the completion callback
+ *
+ * Writes its page list, then sends BULK_TX or BULK_RX in our stream.
+ *
+ * Return: 0, or the error of check_bulk() or vq_queue_message() (IOERR_UNITBUSY if no fragment or slot
+ *   is free).
+ */
 s32 vchiq_queue_bulk(struct vchiq_ctx *ctx, struct vchiq_service *svc, u32 dir, APTR data, u32 size, APTR userdata)
 {
 	s32 rc = check_bulk(ctx, svc, dir, data, size);
