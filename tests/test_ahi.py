@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from harness.tools import assert_clean, status, vctest
+from vchiqtest.tools import assert_clean, status, vctest
 
 MODE_16BIT, MODE_HIFI, MODE_71 = 0x0E680001, 0x0E680002, 0x0E680003  # DEVS:AudioModes/VIDEOCORE; the default output, HDMI0
 TROUBLE = r"\[videocore\.audio\] .*(goes on without the VPU|did not open|never came back)"

@@ -113,17 +113,18 @@ struct VCHIQDevice
 	u32 interrupts; /* taken, for VCInfo COUNTERS */
 };
 
-/*
- * A critical section on the ring, lock held.  The lock keeps contexts apart;
- * the busy count lets the reset path (which cannot take the lock) see whether
- * anyone is inside.  Fails once the reset path has taken the ring over.
+/**
+ * vchiq_ring_enter() - Enter a critical section on the ring.
+ * @base: the device base, lock held
  *
- * No Disable(): every load and store of the two is one instruction, only lock
- * holders change the count, and the reset path only reads it, so the order
- * does the rest.  We count ourselves before we look at halted, the reset path
- * raises halted before it reads the count: either it sees us and waits, or we
- * see it and back out without touching the ring.  The barriers keep the ring's
- * accesses inside the section.
+ * The lock keeps contexts apart; the busy count lets the reset path (which cannot take the lock) see
+ * whether anyone is inside. No Disable(): every load and store of the two is one instruction, only
+ * lock holders change the count, and the reset path only reads it, so the order does the rest. We
+ * count ourselves before we look at halted, the reset path raises halted before it reads the count:
+ * either it sees us and waits, or we see it and back out without touching the ring. The barriers keep
+ * the ring's accesses inside the section.
+ *
+ * Return: TRUE if inside; FALSE once the reset path has taken the ring over.
  */
 static inline BOOL vchiq_ring_enter(struct VCHIQDevice *base)
 {
@@ -137,6 +138,10 @@ static inline BOOL vchiq_ring_enter(struct VCHIQDevice *base)
 	return TRUE;
 }
 
+/**
+ * vchiq_ring_leave() - Leave a critical section on the ring.
+ * @base: the device base
+ */
 static inline void vchiq_ring_leave(struct VCHIQDevice *base)
 {
 	emu68_barrier();

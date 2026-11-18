@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from harness.tools import assert_nothing_left, vctest
+from vchiqtest.tools import assert_nothing_left, vctest
 
 RATES = (8000, 11025, 16000, 22050, 32000, 44100, 48000)
 HDMI0, JACK, HDMI1 = 2, 1, 3

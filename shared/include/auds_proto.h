@@ -44,7 +44,7 @@ enum auds_msg_type
 
 /* CONTROL's dest */
 #define AUDS_DEST_AUTO 0
-#define AUDS_DEST_HEADPHONES 1 /* the 3.5 mm jack (Pi 4, Pi 400; a CM4's carrier may have none) */
+#define AUDS_DEST_HEADPHONES 1 /* the 3.5 mm jack (Pi 4; a CM4's carrier may have none) */
 #define AUDS_DEST_HDMI0 2
 #define AUDS_DEST_HDMI1 3
 

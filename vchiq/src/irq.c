@@ -77,7 +77,14 @@ __asm__(
 	  [lvosignal] "i"(LVO_SIGNAL));
 #endif
 
-/* The unit task must be running: the server signals it.  0 without an interrupt too: the task polls. */
+/**
+ * vchiq_int_enable() - Install the doorbell interrupt server.
+ * @base: the device base; the unit task must be running, the server signals it
+ *
+ * Without a doorbell interrupt nothing is installed: the task polls.
+ *
+ * Return: 0 (also without an interrupt), or VQERR_NOCONNECTION.
+ */
 s32 vchiq_int_enable(struct VCHIQDevice *base)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -106,7 +113,12 @@ s32 vchiq_int_enable(struct VCHIQDevice *base)
 	return 0;
 }
 
-/* Before the unit task stops. */
+/**
+ * vchiq_int_shutdown() - Remove the doorbell interrupt server.
+ * @base: the device base
+ *
+ * Called before the unit task stops.
+ */
 void vchiq_int_shutdown(struct VCHIQDevice *base)
 {
 	struct ExecBase *SysBase = base->sysBase;

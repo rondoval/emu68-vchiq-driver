@@ -18,7 +18,7 @@
 #include <exec/memory.h>
 
 #include <args.h>
-#include <kv.h>
+#include <emu68test/kv.h>
 #include <timing.h>
 #include <auds_proto.h>
 
@@ -86,7 +86,7 @@ static LONG audio_send(struct tool *t, struct audio_run *a, const struct auds_ms
 	if (err != 0)
 	{
 		kv_num("error", err);
-		note("%s: write error %ld\n", what, err);
+		kv_note("%s: write error %ld", what, err);
 	}
 	return err;
 }
@@ -143,9 +143,9 @@ static LONG audio_take(struct tool *t, struct audio_run *a, ULONG timeout_ms, LO
 	{
 		a->unexpected++;
 		if (type == AUDS_MSG_RESULT)
-			note("RESULT %ld after %s\n", (LONG)VCHIQ_LE32((ULONG)m->u.result.success), a->last);
+			kv_note("RESULT %ld after %s", (LONG)VCHIQ_LE32((ULONG)m->u.result.success), a->last);
 		else
-			note("message type %ld after %s\n", type, a->last);
+			kv_note("message type %ld after %s", type, a->last);
 	}
 	vq_consume(&t->svc);
 	return type;
@@ -267,7 +267,7 @@ static BOOL audio_chunk(struct tool *t, struct audio_run *a, UBYTE *buf)
 	if (q != 0 || actual != a->chunk_bytes)
 	{
 		kv_num("error", q);
-		note("bulk transmit: error %ld, %lu of %lu bytes\n", q, actual, a->chunk_bytes);
+		kv_note("bulk transmit: error %ld, %lu of %lu bytes", q, actual, a->chunk_bytes);
 		return FALSE;
 	}
 	a->sent += a->chunk_bytes;
@@ -312,7 +312,7 @@ static BOOL audio_play(struct tool *t, struct audio_run *a, UBYTE *buf, ULONG ch
 		if (audio_take(t, a, VQ_REPLY_TIMEOUT_MS, NULL) < 0)
 		{
 			kv_str("fail", "no COMPLETE");
-			note("no COMPLETE (have %lu of %lu bytes)\n", a->completed, a->sent);
+			kv_note("no COMPLETE (have %lu of %lu bytes)", a->completed, a->sent);
 			return FALSE;
 		}
 	}
@@ -442,13 +442,13 @@ int do_audio(struct tool *t, LONG *args)
 
 	ULONG chunks = (ms + a.chunk_ms - 1u) / a.chunk_ms;
 	if (a.walk)
-		note("the walk: channel 1 beeps once, channel %lu %lu times, %lu ms apart\n", a.channels, a.channels, 2u * AUDIO_WALK_BEEP_MS);
+		kv_note("the walk: channel 1 beeps once, channel %lu %lu times, %lu ms apart", a.channels, a.channels, (ULONG)(2u * AUDIO_WALK_BEEP_MS));
 	BOOL ok = audio_play(t, &a, buf, chunks, TRUE, 0) && audio_stop(t, &a, 0);
 	kv_hex("pins.before", pins);
 	kv_hex("pins.playing", a.pins_playing);
 	if (ok && restart)
 	{
-		note("again, STOP with %lu chunks queued\n", a.depth);
+		kv_note("again, STOP with %lu chunks queued", a.depth);
 		ok = audio_play(t, &a, buf, chunks, FALSE, 1) && audio_stop(t, &a, 1);
 	}
 

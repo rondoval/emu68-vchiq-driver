@@ -37,55 +37,111 @@
 
 /* ---- accessors of the shared state -------------------------------------- */
 
-/* CPU address to VPU bus address: the window's dma-ranges record maps every buffer the VPU reaches (32-bit page lists). */
+/**
+ * bus_offset() - Offset from CPU address to VPU bus address.
+ * @ctx: the core context
+ *
+ * The window's dma-ranges record maps every buffer the VPU reaches (32-bit page lists).
+ *
+ * Return: the offset to add to a CPU address.
+ */
 static inline u32 bus_offset(const struct vchiq_ctx *ctx)
 {
 	return ctx->window_bus - (u32)ctx->window;
 }
 
-/* @addr's offset in its cache line. */
+/**
+ * line_offset() - Offset of an address in its cache line.
+ * @addr: the address
+ *
+ * Return: the offset.
+ */
 static inline u32 line_offset(u32 addr)
 {
 	return addr & LINE_MASK;
 }
 
-/* The start of slot @slot; slot 0 is slot zero itself. */
+/**
+ * slot_base() - Start of a slot.
+ * @ctx: the core context
+ * @slot: the slot number; slot 0 is slot zero itself
+ *
+ * Return: its address.
+ */
 static inline volatile u8 *slot_base(const struct vchiq_ctx *ctx, u32 slot)
 {
 	return ctx->slots + slot * VCHIQ_SLOT_SIZE;
 }
 
-/* The slot @p points into. */
+/**
+ * slot_index_of() - The slot a pointer points into.
+ * @ctx: the core context
+ * @p: a pointer into the slot area
+ *
+ * Return: the slot number.
+ */
 static inline u32 slot_index_of(const struct vchiq_ctx *ctx, const volatile void *p)
 {
 	return (u32)((const volatile u8 *)p - ctx->slots) / VCHIQ_SLOT_SIZE;
 }
 
-/* Entry @i of a side's circular slot queue. */
+/**
+ * queue_entry() - Entry of a side's circular slot queue.
+ * @s: the side's shared state
+ * @i: the entry index, wrapped by the mask
+ *
+ * Return: the slot number there.
+ */
 static inline u32 queue_entry(const volatile struct vchiq_shared_state *s, u32 i)
 {
 	return le32(s->slot_queue[i & VCHIQ_SLOT_QUEUE_MASK]);
 }
 
-/* The slot that holds byte @pos of a side's stream: stream slot q is queue entry q. */
+/**
+ * stream_slot() - The slot that holds a byte of a side's stream.
+ * @s: the side's shared state
+ * @pos: the stream position
+ *
+ * Stream slot q is queue entry q.
+ *
+ * Return: the slot number.
+ */
 static inline u32 stream_slot(const volatile struct vchiq_shared_state *s, u32 pos)
 {
 	return queue_entry(s, VCHIQ_SLOT_QUEUE_INDEX(pos));
 }
 
-/* The message at stream position @pos, in slot @slot. */
+/**
+ * header_at() - The message at a stream position.
+ * @ctx: the core context
+ * @slot: the slot holding it
+ * @pos: the stream position
+ *
+ * Return: its header.
+ */
 static inline volatile struct vchiq_header *header_at(const struct vchiq_ctx *ctx, u32 slot, u32 pos)
 {
 	return (volatile struct vchiq_header *)(slot_base(ctx, slot) + VCHIQ_SLOT_OFFSET(pos));
 }
 
-/* The message slot of a side's synchronous channel. */
+/**
+ * sync_header() - The message slot of a side's synchronous channel.
+ * @ctx: the core context
+ * @s: the side's shared state
+ *
+ * Return: its header.
+ */
 static inline volatile struct vchiq_header *sync_header(const struct vchiq_ctx *ctx, const volatile struct vchiq_shared_state *s)
 {
 	return (volatile struct vchiq_header *)slot_base(ctx, le32(s->slot_sync));
 }
 
-/* One step of a polled wait: sleep on the caller's timer, or spin without one (the reset path cannot Wait()). */
+/**
+ * wait_step() - One step of a polled wait.
+ * @ctx: the core context
+ *
+ * Sleeps on the caller's timer, or spins without one (the reset path cannot Wait()).
+ */
 static inline void wait_step(const struct vchiq_ctx *ctx)
 {
 	if (ctx->timer != NULL)
@@ -94,7 +150,14 @@ static inline void wait_step(const struct vchiq_ctx *ctx)
 		delay_us(POLL_STEP_US);
 }
 
-/* Our OPEN is unanswered: OPENING, or abandoned (CLOSING) before the VPU's port came. */
+/**
+ * is_open_pending() - Whether our OPEN is unanswered.
+ * @svc: the service
+ *
+ * OPENING, or abandoned (CLOSING) before the VPU's port came.
+ *
+ * Return: TRUE if so.
+ */
 static inline BOOL is_open_pending(const struct vchiq_service *svc)
 {
 	return svc->state == VCHIQ_SVC_OPENING || (svc->state == VCHIQ_SVC_CLOSING && svc->remoteport == VCHIQ_PORT_FREE);

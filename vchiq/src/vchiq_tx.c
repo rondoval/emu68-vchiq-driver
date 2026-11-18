@@ -5,12 +5,17 @@
  */
 #include <vchiq/vchiq_core_priv.h>
 
-/*
- * Sender side of a remote event: raise fired, then ring the doorbell if the
- * peer armed it.  On the trigger (@force) it rings regardless, so a transmit
- * can never be missed through an arm/fired race on the VPU side, at the cost
- * of one extra doorbell write.  Returns the peer's
- * armed flag for the trace, not whether we rang.
+/**
+ * vq_remote_event_signal() - Sender side of a remote event: raise fired, then ring the doorbell.
+ * @ctx: the core context
+ * @ev: the remote event
+ * @force: ring even if the peer has not armed the event
+ *
+ * The doorbell rings if the peer armed the event. On the trigger (@force) it rings regardless, so a
+ * transmit can never be missed through an arm/fired race on the VPU side, at the cost of one extra
+ * doorbell write.
+ *
+ * Return: the peer's armed flag, for the trace; not whether we rang.
  */
 BOOL vq_remote_event_signal(struct vchiq_ctx *ctx, volatile struct vchiq_remote_event *ev, BOOL force)
 {
@@ -26,7 +31,13 @@ BOOL vq_remote_event_signal(struct vchiq_ctx *ctx, volatile struct vchiq_remote_
 	return armed;
 }
 
-/* Publish our stream up to @tx_pos and ring the VPU.  Returns its armed flag, for the trace. */
+/**
+ * publish_tx() - Publish our stream up to @tx_pos and ring the VPU.
+ * @ctx: the core context
+ * @tx_pos: the new end of our stream
+ *
+ * Return: the VPU's armed flag, for the trace.
+ */
 static BOOL publish_tx(struct vchiq_ctx *ctx, u32 tx_pos)
 {
 	ctx->host->tx_pos = tx_pos;
@@ -35,15 +46,20 @@ static BOOL publish_tx(struct vchiq_ctx *ctx, u32 tx_pos)
 	return vq_remote_event_signal(ctx, &ctx->shared_vpu->trigger, TRUE);
 }
 
-/*
- * Room for @stride bytes (VCHIQ_MSG_STRIDE(): header and payload) at
- * host->tx_pos: pads out a slot that cannot hold the message and takes the
- * next slot from our queue.  With the queue exhausted it waits up to
- * @timeout_us (0: not at all) for the VPU to recycle one.  With @poll each
- * step of that wait walks the VPU's stream (vchiq_poll(): callbacks, state
- * changes of any service); without, it only takes back the slots the VPU has
- * recycled, which is what a caller inside vchiq_poll() (a CLOSE answered from
- * the walk) must do.  NULL if no slot comes in time, or the queue is corrupt.
+/**
+ * reserve_space() - Reserve room for a message at our stream's end.
+ * @ctx: the core context
+ * @stride: bytes needed, VCHIQ_MSG_STRIDE(): header and payload
+ * @timeout_us: how long to wait for a slot, 0: not at all
+ * @poll: walk the VPU's stream while waiting
+ *
+ * Room for @stride bytes at host->tx_pos: pads out a slot that cannot hold the message and takes the
+ * next slot from our queue. With the queue exhausted it waits up to @timeout_us for the VPU to recycle
+ * one. With @poll each step of that wait walks the VPU's stream (vchiq_poll(): callbacks, state
+ * changes of any service); without, it only takes back the slots the VPU has recycled, which is what a
+ * caller inside vchiq_poll() (a CLOSE answered from the walk) must do.
+ *
+ * Return: the header to fill, or NULL if no slot comes in time or the queue is corrupt.
  */
 static volatile struct vchiq_header *reserve_space(struct vchiq_ctx *ctx, u32 stride, u32 timeout_us, BOOL poll)
 {
@@ -97,7 +113,18 @@ static volatile struct vchiq_header *reserve_space(struct vchiq_ctx *ctx, u32 st
 	return header_at(ctx, host->tx_slot, tx_pos);
 }
 
-/* One message of any type into our stream, published and announced. */
+/**
+ * vq_queue_message() - Put one message of any type into our stream, published and announced.
+ * @ctx: the core context
+ * @msgid: message id (type, source and destination port)
+ * @data: the payload
+ * @size: payload size in bytes
+ * @timeout_us: how long to wait for a slot, 0: not at all
+ * @poll: walk the VPU's stream while waiting
+ *
+ * Return: 0, IOERR_BADLENGTH, VQERR_NOCONNECTION if the shared state is dirty, or IOERR_UNITBUSY if no
+ *   room came.
+ */
 s32 vq_queue_message(struct vchiq_ctx *ctx, u32 msgid, const void *data, u32 size, u32 timeout_us, BOOL poll)
 {
 	if (size > VCHIQ_MAX_MSG_SIZE)
@@ -121,18 +148,33 @@ s32 vq_queue_message(struct vchiq_ctx *ctx, u32 msgid, const void *data, u32 siz
 	return 0;
 }
 
-/* vq_poll_until() predicate: the VPU released our sync slot. */
+/**
+ * is_sync_slot_free() - vq_poll_until() predicate: the VPU released our sync slot.
+ * @ctx: the core context
+ * @arg: unused
+ *
+ * Return: TRUE if it has.
+ */
 static BOOL is_sync_slot_free(const struct vchiq_ctx *ctx, const void *arg)
 {
 	(void)arg;
 	return le32(ctx->shared_ours->sync_release.fired) != 0;
 }
 
-/*
- * One message through our sync slot: the slot is ours while sync_release has
- * fired, until the VPU releases it again.  A taken slot is waited for when
- * @poll allows a walk, else IOERR_UNITBUSY; either way sync_tx_waiting asks
+/**
+ * vq_queue_message_sync() - Put one message through our sync slot.
+ * @ctx: the core context
+ * @msgid: message id
+ * @data: the payload
+ * @size: payload size in bytes
+ * @timeout_us: how long to wait for the slot, 0: not at all
+ * @poll: allow waiting, which walks the VPU's stream
+ *
+ * The slot is ours while sync_release has fired, until the VPU releases it again. A taken slot is
+ * waited for when @poll allows a walk, else IOERR_UNITBUSY; either way sync_tx_waiting asks
  * vchiq_arm_events() for the doorbell that frees it.
+ *
+ * Return: 0, IOERR_BADLENGTH, IOERR_UNITBUSY if the slot stayed taken, or the wait's error.
  */
 s32 vq_queue_message_sync(struct vchiq_ctx *ctx, u32 msgid, const void *data, u32 size, u32 timeout_us, BOOL poll)
 {

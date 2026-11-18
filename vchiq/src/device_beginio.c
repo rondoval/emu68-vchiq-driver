@@ -21,6 +21,11 @@ static const UWORD supported_commands[] = {
     0,
 };
 
+/**
+ * device_query() - Answer NSCMD_DEVICEQUERY.
+ * @base: the device base
+ * @io: the request
+ */
 static void device_query(struct VCHIQDevice *base, struct IOVchiqReq *io)
 {
 	struct NSDeviceQueryResult *q = io->iovq_Req.io_Data;
@@ -38,7 +43,11 @@ static void device_query(struct VCHIQDevice *base, struct IOVchiqReq *io)
 	UnitReply(base, io, 0);
 }
 
-/* Lock held. */
+/**
+ * fill_info() - Fill the NSCMD_VQ_GETINFO record from the device's state and counters.
+ * @base: the device base, lock held
+ * @info: the record to fill
+ */
 static void fill_info(struct VCHIQDevice *base, struct VchiqInfo *info)
 {
 	struct vchiq_ctx *ctx = &base->ctx;
@@ -73,6 +82,11 @@ static void fill_info(struct VCHIQDevice *base, struct VchiqInfo *info)
 	info->vi_UncachedEnd = base->vram_end;
 }
 
+/**
+ * get_info() - Answer NSCMD_VQ_GETINFO.
+ * @base: the device base
+ * @io: the request; at most io_Length bytes are copied
+ */
 static void get_info(struct VCHIQDevice *base, struct IOVchiqReq *io)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -88,6 +102,14 @@ static void get_info(struct VCHIQDevice *base, struct IOVchiqReq *io)
 	UnitReply(base, io, 0);
 }
 
+/**
+ * beginIO() - Device BeginIO vector.
+ * @io: the request
+ * @base: the device base
+ *
+ * Never touches the ring. Query, info and flush requests are answered at once; reads, writes and bulks
+ * are checked and put on the unit's queue under the lock, and the unit task is kicked.
+ */
 void beginIO(struct IOVchiqReq *io asm("a1"), struct VCHIQDevice *base asm("a6"))
 {
 	struct ExecBase *SysBase = base->sysBase;

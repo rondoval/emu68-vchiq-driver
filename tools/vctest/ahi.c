@@ -21,7 +21,7 @@
 #include <devices/ahi.h>
 
 #include <args.h>
-#include <kv.h>
+#include <emu68test/kv.h>
 #include <timing.h>
 
 #include "commands.h"
@@ -211,7 +211,7 @@ int do_ahiwalk(struct tool *t, LONG *args)
 		kv_str("fail", "AHIC_Play failed");
 	else
 	{
-		note("the walk: channel 1 beeps once, channel %lu %lu times, %lu ms apart\n", m.channels, m.channels, 2u * WALK_BEEP_MS);
+		kv_note("the walk: channel 1 beeps once, channel %lu %lu times, %lu ms apart", m.channels, m.channels, (ULONG)(2u * WALK_BEEP_MS));
 		ok = ahi_walk(&m);
 		(void)AHI_ControlAudio(m.ctrl, AHIC_Play, FALSE, TAG_DONE);
 		kv_bool("ahi.stopped", !ok);

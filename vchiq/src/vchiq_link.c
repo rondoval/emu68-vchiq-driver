@@ -25,12 +25,14 @@
 
 /* ---- the reset path ------------------------------------------------------ */
 
-/*
- * The reset guard's work: interrupt-safe, bounded, no Wait().  Takes the ring
- * over from the task and the clients, closes every open service with the
- * polled core and quiesces, so the next boot resumes.  If someone is inside
- * a critical section and does not leave within 50 ms (an interrupt-context
- * reset cannot let a task run), the connection is marked for repair instead.
+/**
+ * vchiq_link_reset() - The reset guard's work: quiesce the connection.
+ * @user: the struct VCHIQDevice
+ *
+ * Interrupt-safe, bounded, no Wait(). Takes the ring over from the task and the clients, closes every
+ * open service with the polled core and quiesces, so the next boot resumes. If someone is inside a
+ * critical section and does not leave within 50 ms (an interrupt-context reset cannot let a task run),
+ * the connection is marked for repair instead.
  */
 void vchiq_link_reset(APTR user)
 {
@@ -119,7 +121,14 @@ static void window_free(struct VCHIQDevice *base)
 
 /* ---- link up / link down ------------------------------------------------- */
 
-/* only the debug log reads it, which a tier of "off" compiles out */
+/**
+ * state_name() - Name of a window state, for the log.
+ * @state: VCHIQ_STATE_FRESH, _LIVE_CLEAN or _LIVE_DIRTY
+ *
+ * Only the debug log reads it, which a tier of "off" compiles out.
+ *
+ * Return: a static string.
+ */
 static __attribute__((unused)) const char *state_name(s32 state)
 {
 	switch (state)
@@ -133,7 +142,15 @@ static __attribute__((unused)) const char *state_name(s32 state)
 	}
 }
 
-/* Called with the lock held, at the first open.  0, or VQERR_NOCONNECTION with the cause logged. */
+/**
+ * vchiq_link_up() - Bring the connection up, at the first open.
+ * @base: the device base, lock held
+ *
+ * Takes the window, finds the hardware, attaches, classifies and connects, then starts the unit task
+ * and the interrupt server.
+ *
+ * Return: 0, or VQERR_NOCONNECTION with the cause logged.
+ */
 s32 vchiq_link_up(struct VCHIQDevice *base)
 {
 	struct ExecBase *SysBase = base->sysBase;
@@ -217,10 +234,12 @@ s32 vchiq_link_up(struct VCHIQDevice *base)
 	return 0;
 }
 
-/*
- * Called without the lock, at expunge.  The task is halted and joined with the
- * lock released: it takes the lock at the top of every round.  The window goes
- * back to cma.resource whether the connection came up or not.
+/**
+ * vchiq_link_down() - Take the connection down, at expunge.
+ * @base: the device base, lock not held
+ *
+ * The task is halted and joined with the lock released: it takes the lock at the top of every round.
+ * The window goes back to cma.resource whether the connection came up or not.
  */
 void vchiq_link_down(struct VCHIQDevice *base)
 {
