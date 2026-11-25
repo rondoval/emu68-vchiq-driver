@@ -1,3 +1,23 @@
+# Release notes - emu68-vchiq-driver 0.7
+
+- **The video libraries moved to Kinora.** `videocodec.library`,
+  `videocore.codec`, `vcjpeg.datatype`, `VCGrab` and the video check `VCInfo`
+  now have a repository of their own
+  ([videocodec-library](https://github.com/rondoval/videocodec-library)) and
+  ship with [Kinora](https://github.com/rondoval/kinora). This component keeps
+  `vchiq.device`, the link to the VideoCore they need, and `videocore.audio`.
+  Nothing installed before is removed.
+- **`VCHIQInfo` checks the link.** It is the old `VCInfo` without its video
+  half: Emu68, the memory shared with the VideoCore, `vchiq.device`, the
+  firmware, the Pi's temperature, power and clocks, and `gpu_mem`; `GCMD`,
+  `COUNTERS` and `DUMP` as before. `VCInfo` is now Kinora's check of the video
+  side. `COMPONENTS` is gone.
+- `vchiq.device` and `videocore.audio` work as in 0.6.
+- **For developers:** the test rig is `VCHIQTest`, with the device and sound
+  commands only; the video tests went with the libraries.
+- **The repository is `emu68-vchiq-driver` now** (it was `emu68-vchiq-library`):
+  it holds no library any more. The versions below shipped under the old name.
+
 # Release notes - emu68-vchiq-library 0.6
 
 - **An image call that gives up no longer stops the VideoCore.** A picture

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
- * vchiq_client.c - a VCHIQ service from a CLI tool (VCInfo, VCTest): open,
+ * vchiq_client.c - a VCHIQ service from a CLI tool (VCHIQInfo, VCHIQTest): open,
  * close, writes and bulks, the next message, GETINFO.
  *
  * Hosted (libnix): SysBase and DOSBase are libnix's.

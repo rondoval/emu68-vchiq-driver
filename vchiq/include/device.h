@@ -110,7 +110,7 @@ struct VCHIQDevice
 	struct Library *gic400Base;
 	struct Interrupt isr;
 	BOOL isr_installed;
-	u32 interrupts; /* taken, for VCInfo COUNTERS */
+	u32 interrupts; /* taken, for VCHIQInfo COUNTERS */
 };
 
 /**

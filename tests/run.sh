@@ -3,8 +3,7 @@
 # The vchiq library's test suite (README.md).
 #
 #   run.sh [pytest options]             the hardware suite, e.g. run.sh -m smoke --server amiga-pi4
-#   run.sh host [pytest options]        vchiqtest's own tests, the code gates and traceability; no Amiga
-#   run.sh material [--only NAME]       make the test material ahead of time
+#   run.sh host [pytest options]        the code gates and traceability; no Amiga
 #
 # Give an option that names a directory as --build-dir=PATH, with the equals sign: pytest takes a
 # separate existing path for a place to collect from, and then finds neither conftest.py nor pytest.ini.
@@ -29,13 +28,9 @@ cd "$here"
 case "${1:-}" in
     host)
         shift
-        exec "$venv/bin/python" -m pytest unit gates "$@"
-        ;;
-    material)
-        shift
-        exec "$venv/bin/python" -m vchiqtest.material "$@"
+        exec "$venv/bin/python" -m pytest gates "$@"
         ;;
     *)
-        exec "$venv/bin/python" -m pytest --ignore=unit --ignore=gates "$@"
+        exec "$venv/bin/python" -m pytest --ignore=gates "$@"
         ;;
 esac
