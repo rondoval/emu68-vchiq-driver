@@ -85,6 +85,21 @@ static ULONG expungeLib(struct VCHIQDevice *base asm("a6"))
 }
 
 /**
+ * vchiq_reset_keyboard() - The reset guard's keyboard path: Ctrl-Amiga-Amiga.
+ * @user: the struct VCHIQDevice
+ *
+ * Interrupt context.  Ctrl-Amiga-Amiga restarts the whole Pi, the VPU with it, so
+ * there is no connection to leave in order for a next session: report done at once
+ * instead of spending up to 1.65 s closing a link that is about to vanish.  The
+ * ColdReboot path restarts the 68k alone and still quiesces (vchiq_link_reset()).
+ */
+static void vchiq_reset_keyboard(APTR user)
+{
+	struct VCHIQDevice *base = user;
+	reset_guard_done(&base->resetGuard);
+}
+
+/**
  * initFunction() - Device init (RTF_AUTOINIT): check the cache-ops flavour and install the reset
  *   guard.
  * @base: the new device base
@@ -114,7 +129,9 @@ static APTR initFunction(struct VCHIQDevice *base asm("d0"), ULONG segList asm("
 	_NewMinList(&base->units);
 	base->irq_signal = -1;
 
-	if (!reset_guard_install(&base->resetGuard, SysBase, vchiq_link_reset, base, (CONST_STRPTR)deviceName))
+	if (reset_guard_install(&base->resetGuard, SysBase, vchiq_link_reset, base, (CONST_STRPTR)deviceName))
+		reset_guard_set_defer(&base->resetGuard, vchiq_reset_keyboard);
+	else
 		Kprintf("[vchiq] %s: reset guard install failed\n", __func__);
 
 	return base;

@@ -151,7 +151,7 @@ static inline void vchiq_ring_leave(struct VCHIQDevice *base)
 /* vchiq_link.c: the connection, at the first open and at expunge */
 s32 vchiq_link_up(struct VCHIQDevice *base);     /* lock held; 0 or VQERR_NOCONNECTION */
 void vchiq_link_down(struct VCHIQDevice *base);  /* lock not held */
-void vchiq_link_reset(APTR user);                /* the reset guard's prepare(), user = the device */
+void vchiq_link_reset(APTR user);                /* the reset guard's prepare() (ColdReboot path), user = the device */
 
 /* devtree_parse.c */
 u32 DevTreeParse(struct VCHIQDevice *base); /* 0, or ENODEV */

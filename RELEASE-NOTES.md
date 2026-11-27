@@ -12,7 +12,9 @@
   firmware, the Pi's temperature, power and clocks, and `gpu_mem`; `GCMD`,
   `COUNTERS` and `DUMP` as before. `VCInfo` is now Kinora's check of the video
   side. `COMPONENTS` is gone.
-- `vchiq.device` and `videocore.audio` work as in 0.6.
+- `videocore.audio` works as in 0.6, and so does `vchiq.device`, except that
+  **Ctrl-Amiga-Amiga no longer waits** for it to close the link to the
+  VideoCore, which took up to 1.6 s: the whole Pi restarts anyway.
 - **For developers:** the test rig is `VCHIQTest`, with the device and sound
   commands only; the video tests went with the libraries.
 - **The repository is `emu68-vchiq-driver` now** (it was `emu68-vchiq-library`):

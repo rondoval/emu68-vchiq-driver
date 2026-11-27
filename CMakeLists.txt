@@ -29,7 +29,7 @@ endif()
 # doorbell interrupt server).  The client headers of mailbox.resource (the VCHIQ init
 # tag goes through MB_RawCommand) and cma.resource (the window) come with the
 # toolchain image (amiga-build-container).
-find_package(Emu68Common 2.4 CONFIG REQUIRED) # 2.4: the test harness (Emu68Common::kv, emu68test); 2.3: prefs_open(), strfit(); 2.1: drv_waitq, the dma-ranges/symbol/carve-out devtree helpers
+find_package(Emu68Common 2.6 CONFIG REQUIRED) # 2.6: reset_guard_set_defer(); 2.4: the test harness (Emu68Common::kv, emu68test); 2.3: prefs_open(), strfit(); 2.1: drv_waitq, the dma-ranges/symbol/carve-out devtree helpers
 find_package(GIC400 1.3 CONFIG REQUIRED)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
