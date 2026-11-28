@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
- * waiter.h - what a tool waits with: its task and signal, which a videocodec
- * session is told to use, and a timer.
+ * waiter.h - what a tool waits with: its task and signal, which its requests
+ * are told to use, and a timer.
  */
 #ifndef TOOLS_WAITER_H
 #define TOOLS_WAITER_H

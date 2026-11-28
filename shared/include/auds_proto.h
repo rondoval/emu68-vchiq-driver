@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
  * auds_proto.h - the firmware's audio service ("AUDS") over VCHIQ: the
- * messages videocore.audio and VCTest AUDIO send and receive.
+ * messages videocore.audio and VCHIQTest AUDIO send and receive.
  *
  * The messages follow userland/interface/vmcs_host/vc_vchi_audioserv_defs.h
  * (Copyright (c) 2012, Broadcom Europe Ltd, BSD-3-Clause).  Every message is

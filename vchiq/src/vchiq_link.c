@@ -29,10 +29,12 @@
  * vchiq_link_reset() - The reset guard's work: quiesce the connection.
  * @user: the struct VCHIQDevice
  *
- * Interrupt-safe, bounded, no Wait(). Takes the ring over from the task and the clients, closes every
- * open service with the polled core and quiesces, so the next boot resumes. If someone is inside a
- * critical section and does not leave within 50 ms (an interrupt-context reset cannot let a task run),
- * the connection is marked for repair instead.
+ * The ColdReboot path (C:Reboot), which restarts the 68k alone while the VPU runs on: Ctrl-Amiga-Amiga
+ * restarts the whole Pi and reports done at once (vchiq_reset_keyboard()).  Interrupt-safe, bounded,
+ * no Wait(): ColdReboot() may come from anywhere.  Takes the ring over from the task and the clients,
+ * closes every open service with the polled core and quiesces, so the next boot resumes. If someone is
+ * inside a critical section and does not leave within 50 ms (a caller in an interrupt or Disable()
+ * cannot let a task run), the connection is marked for repair instead.
  */
 void vchiq_link_reset(APTR user)
 {
@@ -45,7 +47,7 @@ void vchiq_link_reset(APTR user)
 	/* No new critical sections from here on: vchiq_ring_enter() fails for the task and the clients. */
 	base->halted = 1;
 	emu68_barrier(); /* raised before the count is read: see vchiq_ring_enter() */
-	/* Those already inside get 50 ms to leave; under a keyboard reset no task runs, so they may never. */
+	/* Those already inside get 50 ms to leave; from an interrupt or Disable() no task runs, so they may never. */
 	for (u32 i = 0; i < 50 && base->ring_busy != 0; i++)
 		delay_us(1000);
 	if (base->ring_busy != 0)

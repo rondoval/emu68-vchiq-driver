@@ -1,15 +1,14 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
- * VCTest - the test rig of vchiq.device, videocodec.library, videocore.audio
- * and vcjpeg.datatype, driven by the test suite (tests/, developer-guide.md
- * section 8).  One command per run; its facts come out as key=value lines
- * (kv.h), the verdict last.  VCInfo shows the same state for people.
+ * VCHIQTest - the test rig of vchiq.device and videocore.audio, driven by the
+ * test suite (tests/, developer-guide.md section 6).  One command per run; its
+ * facts come out as key=value lines (kv.h), the verdict last.  VCHIQInfo shows
+ * the same state for people.
  *
- *   VCTest ?                           the commands
- *   VCTest <command> ?                 a command's template
+ *   VCHIQTest ?                        the commands
+ *   VCHIQTest <command> ?              a command's template
  *
- *   STATUS                             vchiq.device's connection and counters, every backend's
- *   CODECS                             the codec table
+ *   STATUS                             vchiq.device's connection and counters
  *   MARK text                          a mark in the debug log (the capture self-test)
  *   ABANDON                            leave the connection as a crash would (the repair test;
  *                                      needs a vchiq.device built with VCHIQ_TEST_HOOKS)
@@ -18,28 +17,7 @@
  *   AHIWALK MODE n [RATE n]            the channel walk through an AHI mode
  *   AHITONE MODE n [MS n] [RATE n] [HZ n]
  *                                      the tone through an AHI mode, start and stop timed
- *   DECODE file [REF framemd5] [OUT file] [FRAMES n] [NOHASH] [ENCODING H264|MJPEG] [VERBOSE]
- *          [FRAMED] [FPS n] [OUTFORMAT f] [FLUSH n] [BACKEND name] [EXTRADATA] [PAD n] [NOPTS] [NORATE] [PACKET n]
- *          [HASHES] [CONFIG file] [TAG fourcc] [KEEP] [RESIGNAL n] [IMPORT n] [IMPORTFRAMES n] [WIDTH n] [HEIGHT n]
- *                                      an elementary stream through a decoder session
- *   IMAGE file OUT pic [OUTWIDTH n] [OUTHEIGHT n] [OUTFORMAT f] [ENCODING c] [BACKEND name] [MISALIGN] [TIMEOUT ms] [PLACE x,y,w,h]
- *                                      one still through VC_DecodeImage()
- *   TOJPEG raw WIDTH n HEIGHT n OUT jpg [FORMAT f] [QUALITY n] [BACKEND name] [MISALIGN]
- *                                      one raw picture through VC_EncodeImage()
- *   CONVERT raw WIDTH n HEIGHT n OUT pic [FORMAT f] [OUTWIDTH n] [OUTHEIGHT n] [OUTFORMAT f]
- *           [BACKEND name] [MISALIGN] [COUNT n] [SOURCE x,y,w,h]
- *                                      one raw picture through VC_ConvertImage(), or
- *                                      COUNT times through a converter session, timed
- *   ENCODE raw WIDTH n HEIGHT n OUT h264 [FPS n] [BITRATE n] [KEYINT n] [KEYREQ n] [FORMAT f] [OUTWIDTH n] [OUTHEIGHT n] [HOLD n] [GAPS] [ENDEMPTY] [BACKEND name]
- *          [PACE] [PACKET n] [PROFILE p] [LEVEL n] [RATE VBR|CBR] [COLORSPACE c]
- *                                      a raw file through an H.264 encoder session
- *   DATATYPE file [OUT pic]            a picture through datatypes.library
- *   PAGE file... [COPIES n]            many at once, a process each, as a browser loads a page
- *   SCREEN WIDTH n HEIGHT n [DEPTH n] [SECONDS n] [NOISE] [BACK n]
- *                                      a Picasso96 screen to record: colour bars, a block moving, or noise
- *   HOLD LEAVE n                       all the free RAM the VPU reaches taken but n MiB, until Ctrl-C
  *   DEVICE                             vchiq.device's own commands: NSCMD_DEVICEQUERY, CMD_FLUSH
- *   PROBE name                         a codec backend's refusals, its entry points called directly
  *
  * Return codes: 0 the command did its work and its checks passed (PASS),
  * 5 a check failed, 10 the environment (a library, device, file or memory
@@ -47,8 +25,7 @@
  * made no sense (then before the format line).
  *
  * Hosted CLI program (libnix).  A VCHIQ service is plain Exec I/O
- * (vchiq_client.c); a session signals this task and its items come through
- * VC_Poll().
+ * (vchiq_client.c).
  */
 #ifdef __INTELLISENSE__
 #include <clib/exec_protos.h>
@@ -69,36 +46,26 @@
 
 #include "commands.h"
 
-struct Library *VideoCodecBase;
-
 /* libnix swaps to a stack of this size: the library's calls and waits run on it */
 unsigned long __stack = 32768;
 
 static const char verstag[] __attribute__((used)) = VERSTAG;
 
-/* A command: its name, its ReadArgs() template, its entry point, whether it needs videocodec.library */
+/* A command: its name, its ReadArgs() template, its entry point */
 struct command
 {
-	const char *name;
-	const char *template;
-	command_fn run;
-	BOOL needs_codec;
+	const char *name;     /* what the command line calls it, any case */
+	const char *template; /* its ReadArgs() template */
+	command_fn run;       /* its entry point */
 };
 
 static int do_mark(struct tool *t, LONG *args);
 
 static const struct command commands[] = {
-    {"STATUS", status_template, do_status, FALSE},     {"CODECS", codecs_template, do_codecs, TRUE},
-    {"MARK", "TEXT/F", do_mark, FALSE},                {"ABANDON", abandon_template, do_abandon, FALSE},
-    {"AUDIO", audio_template, do_audio, FALSE},        {"AHIWALK", ahiwalk_template, do_ahiwalk, FALSE},
-    {"AHITONE", ahitone_template, do_ahitone, FALSE},  {"DECODE", decode_template, do_decode, TRUE},
-    {"IMAGE", image_template, do_image, TRUE},         {"TOJPEG", tojpeg_template, do_tojpeg, TRUE},
-    {"CONVERT", convert_template, do_convert, TRUE},   {"ENCODE", encode_template, do_encode, TRUE},
-    {"DATATYPE", datatype_template, do_datatype, FALSE}, {"PAGE", page_template, do_page, TRUE},
-    {"SCREEN", screen_template, do_screen, FALSE},
-    {"HOLD", hold_template, do_hold, FALSE},
-    {"DEVICE", device_template, do_device, FALSE},
-    {"PROBE", probe_template, do_probe, FALSE},
+    {"STATUS", status_template, do_status},     {"MARK", "TEXT/F", do_mark},
+    {"ABANDON", abandon_template, do_abandon},  {"AUDIO", audio_template, do_audio},
+    {"AHIWALK", ahiwalk_template, do_ahiwalk},  {"AHITONE", ahitone_template, do_ahitone},
+    {"DEVICE", device_template, do_device},
 };
 
 /**
@@ -113,7 +80,7 @@ static int do_mark(struct tool *t, LONG *args)
 	(void)t;
 	const char *text = args[0] != 0 ? (const char *)args[0] : "";
 	kv_str("mark", text);
-	debugport_printf("[VCTest] mark %s\n", text);
+	debugport_printf("[VCHIQTest] mark %s\n", text);
 	return RETURN_OK;
 }
 
@@ -177,8 +144,7 @@ static struct RDArgs *parse_rest(const char *template, const char *rest, LONG *a
 /**
  * main() - Entry point: look up the command, parse its arguments and run it with a kv grammar around it.
  *
- * VCTest ? lists the commands, VCTest COMMAND ? one command's template.  videocodec.library is opened for every
- * command; one that needs it fails without.
+ * VCHIQTest ? lists the commands, VCHIQTest COMMAND ? one command's template.
  *
  * Return: the command's return code via kv_end(), RETURN_OK for the help, RETURN_FAIL for a bad command or arguments.
  */
@@ -188,7 +154,7 @@ int main(void)
 	struct RDArgs *rda = ReadArgs((CONST_STRPTR) "COMMAND/A,ARGS/F", top, NULL);
 	if (rda == NULL)
 	{
-		PrintFault(IoErr(), (CONST_STRPTR) "VCTest");
+		PrintFault(IoErr(), (CONST_STRPTR) "VCHIQTest");
 		return RETURN_FAIL;
 	}
 	const char *name = (const char *)top[0], *rest = (const char *)top[1];
@@ -203,7 +169,7 @@ int main(void)
 	const struct command *cmd = command_named(name);
 	if (cmd == NULL)
 	{
-		Printf((CONST_STRPTR) "VCTest: no command %s (VCTest ? lists them)\n", name);
+		Printf((CONST_STRPTR) "VCHIQTest: no command %s (VCHIQTest ? lists them)\n", name);
 		goto out_top;
 	}
 	if (rest != NULL && strcmp(rest, "?") == 0)
@@ -221,23 +187,15 @@ int main(void)
 		rda_cmd = parse_rest(cmd->template, rest, args);
 		if (rda_cmd == NULL)
 		{
-			PrintFault(IoErr(), (CONST_STRPTR) "VCTest");
+			PrintFault(IoErr(), (CONST_STRPTR) "VCHIQTest");
 			goto out_top;
 		}
 	}
 
-	kv_debug_log("VCTest", (const char *)GetArgStr(), FALSE);
+	kv_debug_log("VCHIQTest", (const char *)GetArgStr(), FALSE);
 	kv_begin(cmd->name);
 	kv_num("cli", ((struct Process *)FindTask(NULL))->pr_TaskNum);
 	rc = RETURN_ERROR;
-	VideoCodecBase = OpenLibrary((CONST_STRPTR)VIDEOCODEC_NAME, 0);
-	if (VideoCodecBase != NULL)
-		kv_version("videocodec.version", VideoCodecBase->lib_Version, VideoCodecBase->lib_Revision);
-	else if (cmd->needs_codec)
-	{
-		kv_str("fail", "videocodec.library did not open");
-		goto out_run;
-	}
 	static struct tool t; /* big: the service's message buffers */
 	memset(&t, 0, sizeof(t));
 	t.waiter.sig = -1;
@@ -250,8 +208,6 @@ int main(void)
 	waiter_close(&t.waiter);
 out_run:
 	rc = kv_end(rc);
-	if (VideoCodecBase != NULL)
-		CloseLibrary(VideoCodecBase);
 	if (rda_cmd != NULL)
 	{
 		FreeArgs(rda_cmd);

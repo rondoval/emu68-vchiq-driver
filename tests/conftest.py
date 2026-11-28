@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """
 conftest.py - the suite of the vchiq library (tests/README.md): emu68-common's
-harness (emu68test, from the stack's install tree) and this repository's
-VideoCore part of it (vchiqtest/, which the build also installs for the codec
-backends' suites).
+harness (emu68test, from the stack's install tree) and this repository's part
+of it (vchiqtest/).
 """
 from __future__ import annotations
 
@@ -20,5 +19,5 @@ pytest.register_assert_rewrite("emu68test", "vchiqtest")    # before the first i
 from emu68test import plugin  # noqa: E402
 from vchiqtest import suite  # noqa: E402
 
-plugin.configure(suite.suite("emu68-vchiq-library", suite.COMPONENT, TESTS))
+plugin.configure(suite.suite("emu68-vchiq-driver", suite.COMPONENT, TESTS))
 pytest_plugins = ["emu68test.plugin", "vchiqtest.plugin"]

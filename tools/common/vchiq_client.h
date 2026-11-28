@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
- * vchiq_client.h - a VCHIQ service from a CLI tool (VCInfo, VCTest).
+ * vchiq_client.h - a VCHIQ service from a CLI tool (VCHIQInfo, VCHIQTest).
  *
  * A service is plain Exec I/O on vchiq.device: VQ_READS reads are kept
  * posted, writes and bulk transfers are DoIO()s.  Every wait takes a

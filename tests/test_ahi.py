@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""videocore.audio, the AHI driver, through ahi.device's low-level API (VCTest AHITONE, AHIWALK): its three modes."""
+"""videocore.audio, the AHI driver, through ahi.device's low-level API (VCHIQTest AHITONE, AHIWALK): its three modes."""
 import time
 
 import pytest
 
-from vchiqtest.tools import assert_clean, status, vctest
+from vchiqtest.tools import assert_clean, services_open, status, vchiqtest
 
 MODE_16BIT, MODE_HIFI, MODE_71 = 0x0E680001, 0x0E680002, 0x0E680003  # DEVS:AudioModes/VIDEOCORE; the default output, HDMI0
 TROUBLE = r"\[videocore\.audio\] .*(goes on without the VPU|did not open|never came back)"
@@ -13,12 +13,12 @@ TROUBLE = r"\[videocore\.audio\] .*(goes on without the VPU|did not open|never c
 @pytest.fixture(scope="module")
 def services_before(device):
     """The services open before the plays: every AUDS service they open must be closed again."""
-    return int(status(device).num("vchiq.services"))
+    return services_open(device)
 
 
 def tone(device, mode, ms=4000, extra=""):
-    """VCTest AHITONE through @mode for @ms, which must pass and play about that long."""
-    r = vctest(device, f"AHITONE MODE {mode} MS {ms} {extra}", ms // 1000 + 30)
+    """VCHIQTest AHITONE through @mode for @ms, which must pass and play about that long."""
+    r = vchiqtest(device, f"AHITONE MODE {mode} MS {ms} {extra}", ms // 1000 + 30)
     assert r.passed, r.kv.get("fail")
     played = r.num("ahi.us") / 1000
     assert ms - 200 <= played <= ms + 1500, f"a {ms} ms tone played {played:.0f} ms"
@@ -51,7 +51,7 @@ def test_tone_hifi(device, services_before):
 
 def test_two_streams(device, services_before):
     """Two plays at once: two streams, each its own AUDS service."""
-    bg = device.start("VCTest", f"AHITONE MODE {MODE_16BIT} MS 6000 HZ 660")
+    bg = device.start("VCHIQTest", f"AHITONE MODE {MODE_16BIT} MS 6000 HZ 660")
     time.sleep(1)
     try:
         tone(device, MODE_16BIT)
@@ -62,7 +62,7 @@ def test_two_streams(device, services_before):
 
 def test_break_stops_at_once(device, services_before, record_property):
     """A ten-second tone broken after two: it stops at once, and the next play works."""
-    job = device.start("VCTest", f"AHITONE MODE {MODE_16BIT} MS 10000")
+    job = device.start("VCHIQTest", f"AHITONE MODE {MODE_16BIT} MS 10000")
     time.sleep(2)
     job.stop()
     r = job.wait(10)
@@ -82,12 +82,12 @@ def test_71_mode(device, services_before):
 def test_71_order_by_ear(device, operator):
     """HDMI0 through the 7.1 mode: beeps 1 to 8 from front L, R, rear L, R, side L, R, centre, LFE."""
     operator.say("listen: eight groups of beeps, one speaker each, front left first")
-    r = vctest(device, f"AHIWALK MODE {MODE_71}", 90)
+    r = vchiqtest(device, f"AHIWALK MODE {MODE_71}", 90)
     assert r.passed, r.kv.get("fail")
     operator.ask("Did beeps 1-8 come from front L, front R, rear L, rear R, side L, side R, centre, LFE?")
 
 
 @pytest.mark.smoke
 def test_services_closed(device, services_before):
-    """Every AUDS service the plays opened is closed again; nothing left on the codec."""
+    """Every AUDS service the plays opened is closed again."""
     assert_clean(status(device), services=services_before)

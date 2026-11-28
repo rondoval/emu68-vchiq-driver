@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """
-plugin.py - the pytest plugin of a VideoCore suite, loaded after emu68test's
-(suite.py shows how): its options, the tiers, and the fixtures.
+plugin.py - the suite's pytest plugin, loaded after emu68test's (conftest.py
+shows how): its options, the tiers, and the fixtures.
 
-Options: --no-reboot, --listen, --hands, --profile, --update-baselines,
---keep-ram, beside emu68test's.
+Options: --no-reboot, --listen, --hands, --keep-ram, beside emu68test's.
 
 Fixtures:
   device        the Amiga: connected, the resident files installed (checked with --no-install), RAM:hw
-                ready, the rigs proven to run and to reach the debug log
-  material      the test material, made on the host and uploaded when first used
-  baselines     the suite's baselines.json for this machine
+                ready, the rig proven to run and to reach the debug log
   operator      the person at the machine, for the listen and hands tiers
   artifacts     this test's directory in the run dir
   driver_log    the debug log, for a test that reads the drivers' lines
@@ -22,7 +19,6 @@ from pathlib import Path
 import pytest
 
 from emu68test import plugin
-from emu68test.baselines import Baselines
 from emu68test.build import BuildInfo
 from emu68test.debuglog import DebugLog
 from emu68test.install import Installer
@@ -30,11 +26,9 @@ from emu68test.operator import Operator
 from emu68test.results import HarnessError
 
 from .machine import VchiqDevice
-from .material import Material, cache_dir
 from .suite import COMPONENT, RESIDENT
 
 HOOKS_OPTION = "EMU68_VCHIQ_TEST_HOOKS"     # the stack's cache option that builds vchiq.device's test commands
-INTERRUPTED_DRAWER = "LIBS:videocodec-tests"    # LIBS:videocodec while a test of the backends' drawer runs
 LOG_WAIT_S = 3.0                            # how long a line written on the Amiga takes to reach the capture
 
 
@@ -55,19 +49,16 @@ def state(config) -> State:
 
 
 def pytest_addoption(parser):
-    g = parser.getgroup("vchiqtest", "a VideoCore suite")
+    g = parser.getgroup("vchiqtest", "the vchiq suite")
     g.addoption("--no-reboot", action="store_true", help="deselect the tests that reboot")
     g.addoption("--listen", action="store_true", help="select the tests someone at the machine judges by ear")
     g.addoption("--hands", action="store_true", help="select the tests that need the user's hands")
-    g.addoption("--profile", action="store_true", help="select the timing tests (a profile-tier build installed)")
-    g.addoption("--update-baselines", action="store_true",
-                help="write this machine's measured values into baselines.json")
     g.addoption("--keep-ram", action="store_true", help="leave RAM:hw on the Amiga at the end")
 
 
 def _selected(config, item) -> bool:
     """Whether the run's options select @item's tier."""
-    for marker in ("listen", "hands", "profile"):
+    for marker in ("listen", "hands"):
         if item.get_closest_marker(marker) and not config.getoption(f"--{marker}"):
             return False
     return not (item.get_closest_marker("reboot") and config.getoption("--no-reboot"))
@@ -78,12 +69,9 @@ def pytest_collection_modifyitems(config, items):
     kept = [item for item in items if _selected(config, item)]
     dropped = [item for item in items if not _selected(config, item)]
     hooks = state(config).vchiq_build.option(HOOKS_OPTION)
-    profiled = plugin.session(config).build_info.profile
     for item in kept:
         if item.get_closest_marker("hooks") and not hooks:
             item.add_marker(pytest.mark.skip(reason=f"the installed build has no test hooks ({HOOKS_OPTION})"))
-        if item.get_closest_marker("profile") and not profiled:
-            item.add_marker(pytest.mark.skip(reason="the installed build does not profile this component"))
     kept.sort(key=lambda item: (bool(item.get_closest_marker("reboot")), bool(item.get_closest_marker("hands"))))
     if dropped:
         config.hook.pytest_deselected(items=dropped)
@@ -114,17 +102,17 @@ def _install(device: VchiqDevice, installer: Installer, files: dict[str, bytes],
 
 
 def _prove_rigs(device: VchiqDevice, report, capture: DebugLog, logs: bool) -> None:
-    """VCTest runs, its mark reaches the capture, and a debug build's device logs its first open."""
+    """VCHIQTest runs, its mark reaches the capture, and a debug build's device logs its first open."""
     mark = capture.mark()
-    result = device.run("VCTest", "MARK hello", 30)
+    result = device.run("VCHIQTest", "MARK hello", 30)
     if not (result.passed and result.kv.get("mark") == "hello"):
-        pytest.exit(f"VCTest does not run on the Amiga:\n{result.raw[-400:]}", returncode=plugin.EXIT_ENVIRONMENT)
-    if capture.ok and not capture.wait_for(r"\[VCTest\] mark hello", mark, LOG_WAIT_S):
+        pytest.exit(f"VCHIQTest does not run on the Amiga:\n{result.raw[-400:]}", returncode=plugin.EXIT_ENVIRONMENT)
+    if capture.ok and not capture.wait_for(r"\[VCHIQTest\] mark hello", mark, LOG_WAIT_S):
         capture.ok = False
         capture.why = "the log shows no mark from the Amiga: another machine's adapter, or the wrong port"
         report.header.append("Debug log: port open but no mark from this Amiga; log checks skipped")
     if capture.ok and logs and device.install_mark is not None:
-        device.run("VCTest", "STATUS", 30)
+        device.run("VCHIQTest", "STATUS", 30)
         if not capture.wait_for(r"\[vchiq\] up: session", device.install_mark, LOG_WAIT_S):
             pytest.exit("the installed build does not log ('[vchiq] up:' missing after the reboot): "
                         "not the debug flavour?", returncode=plugin.EXIT_ENVIRONMENT)
@@ -133,13 +121,11 @@ def _prove_rigs(device: VchiqDevice, report, capture: DebugLog, logs: bool) -> N
 @pytest.fixture(scope="session")
 def device(request, rundir, capture) -> VchiqDevice:
     """The Amiga: connected, the resident files installed (checked with --no-install), RAM:hw ready, the
-    rigs on it."""
+    rig on it."""
     config = request.config
     run = plugin.session(config)
     dev = plugin.connect(request, capture, VchiqDevice)
     dev.install_dir = Path(config.getoption("--install-dir"))
-    if dev.exec(f"List >NIL: {INTERRUPTED_DRAWER}", timeout=15)[0] == 0:    # left by an interrupted run
-        dev.exec(f"Rename {INTERRUPTED_DRAWER} AS LIBS:videocodec", timeout=15)
     files = resident_files(dev.install_dir, run.report)
     installer = Installer(dev, Path(run.suite.tests_dir) / ".machine" / config.getoption("--server"))
     if config.getoption("--no-install"):
@@ -155,25 +141,6 @@ def device(request, rundir, capture) -> VchiqDevice:
     yield dev
     if not config.getoption("--keep-ram"):
         dev.exec(f"Delete {dev.ram} ALL QUIET", timeout=60)
-
-
-@pytest.fixture(scope="session")
-def material(request, device) -> Material:
-    """The test material: made on the host when missing, uploaded to RAM:hw when first used."""
-    return Material(cache_dir(Path(plugin.session(request.config).suite.tests_dir)), device)
-
-
-@pytest.fixture(scope="session")
-def baselines(request, rundir) -> Baselines:
-    """This machine's baselines; the measured values go to measured.json at the end (and back into
-    baselines.json with --update-baselines)."""
-    run = plugin.session(request.config)
-    path = Path(run.suite.tests_dir) / "baselines.json"
-    found = Baselines.load(path, request.config.getoption("--server"))
-    run.baselines = found
-    yield found
-    if request.config.getoption("--update-baselines"):
-        found.update(path)
 
 
 @pytest.fixture(scope="session")

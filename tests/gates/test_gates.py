@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """The code gates on the component's C (emu68test/gates.py) and traceability (trace_items.py), on every
-host run. All of the C here is the component's own, the test rigs and the examples included; the
-mkv-writer submodule is another repository's."""
+host run. All of the C here is the component's own, the test rig included."""
 import pytest
 from emu68test import trace
 from emu68test.gates import Gates
@@ -10,13 +9,11 @@ import trace_items as items
 
 pytestmark = pytest.mark.gates
 
-FOLDERS = ("vchiq", "videocodec", "videocore", "ahi", "datatype", "shared", "tools", "tests/swconv")
-SUBMODULE = "mkv"                  # tools/vcgrab/mkv
+FOLDERS = ("vchiq", "ahi", "shared", "tools")
 INHERITED = "0.6:"                 # the reason of a ceiling the 0.6 code set
 COMPLEXITY_LIMIT = 15              # without an entry in complexity-allow.txt (the harness says 10)
 COMPLEXITY_ALLOWED = 20            # the highest ceiling an entry gives, inherited ones aside (the harness says 15)
-SOURCES = sorted(path for folder in FOLDERS for path in (items.COMPONENT_DIR / folder).rglob("*.[ch]")
-                 if SUBMODULE not in path.parts)
+SOURCES = sorted(path for folder in FOLDERS for path in (items.COMPONENT_DIR / folder).rglob("*.[ch]"))
 GATES = Gates(items.COMPONENT_DIR, SOURCES, items.TESTS / "complexity-allow.txt", INHERITED,
               COMPLEXITY_LIMIT, COMPLEXITY_ALLOWED)
 

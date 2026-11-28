@@ -1,19 +1,25 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""The firmware's audio service (AUDS), driven directly by VCTest AUDIO: what videocore.audio is built on."""
+"""The firmware's audio service (AUDS), driven directly by VCHIQTest AUDIO: what videocore.audio is built on."""
 import time
 
 import pytest
 
-from vchiqtest.tools import assert_nothing_left, vctest
+from vchiqtest.tools import assert_clean, services_open, status, vchiqtest
 
 RATES = (8000, 11025, 16000, 22050, 32000, 44100, 48000)
 HDMI0, JACK, HDMI1 = 2, 1, 3
 DESTS = {"hdmi0": HDMI0, "jack": JACK, "hdmi1": HDMI1}
 
 
+@pytest.fixture(scope="module")
+def services_before(device):
+    """The services open before the runs: every AUDS service they open must be closed again."""
+    return services_open(device)
+
+
 def audio(device, args, timeout=60):
-    """VCTest AUDIO with @args, which must pass."""
-    r = vctest(device, f"AUDIO {args}", timeout)
+    """VCHIQTest AUDIO with @args, which must pass."""
+    r = vchiqtest(device, f"AUDIO {args}", timeout)
     assert r.passed, f"{r.kv.get('fail')} (CONTROL {r.kv.get('control.result')}, CONFIG {r.kv.get('config.result')})"
     return r
 
@@ -55,7 +61,7 @@ def test_stop_and_restart(device, record_property):
 @pytest.mark.parametrize("dest", ["hdmi0", "jack"], ids=["both-hdmi0", "hdmi0-and-jack"])
 def test_two_streams(device, record_property, dest):
     """Two streams at once: a second AUDIO beside a running one, both on HDMI0, then HDMI0 and the jack."""
-    bg = device.start("VCTest", "AUDIO MS 4000 CHUNK 10 DEPTH 4")
+    bg = device.start("VCHIQTest", "AUDIO MS 4000 CHUNK 10 DEPTH 4")
     time.sleep(1)
     try:
         r = audio(device, f"MS 2000 DEST {DESTS[dest]} CHUNK 10 DEPTH 4")
@@ -67,7 +73,7 @@ def test_two_streams(device, record_property, dest):
 
 def test_hdmi1(device, record_property):
     """HDMI1, usually with nothing on it: how the service answers (recorded, a fact of the machine)."""
-    r = vctest(device, f"AUDIO MS 500 DEST {HDMI1} CHUNK 10 DEPTH 4", 60)
+    r = vchiqtest(device, f"AUDIO MS 500 DEST {HDMI1} CHUNK 10 DEPTH 4", 60)
     record_property("outcome", "PASS" if r.passed else f"{r.kv.get('fail')} (CONTROL {r.kv.get('control.result')}, "
                                                        f"CONFIG {r.kv.get('config.result')})")
 
@@ -76,7 +82,7 @@ def test_hdmi1(device, record_property):
                          ids=lambda v: str(v))
 def test_channels(device, record_property, dest, channels):
     """Channel counts at 48 kHz: each refused by CONFIG (recorded) or consumed at the rate."""
-    r = vctest(device, f"AUDIO MS 2000 DEST {DESTS[dest]} CHANNELS {channels} CHUNK 10 DEPTH 4", 60)
+    r = vchiqtest(device, f"AUDIO MS 2000 DEST {DESTS[dest]} CHANNELS {channels} CHUNK 10 DEPTH 4", 60)
     if r.kv.get("config.result") not in (None, "0"):
         record_property("CONFIG", f"refused: {r.kv['config.result']}")
         return
@@ -130,6 +136,6 @@ def test_channel_walk(device, operator):
 
 
 @pytest.mark.smoke
-def test_nothing_left(device):
-    """No session left, no stray message."""
-    assert_nothing_left(device)
+def test_nothing_left(device, services_before):
+    """Every AUDS service the runs opened is closed again."""
+    assert_clean(status(device), services=services_before)
